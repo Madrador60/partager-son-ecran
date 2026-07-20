@@ -1,14 +1,16 @@
 {
   "name": "remoteassist-complete",
-  "version": "2.0.0",
-  "description": "Assistance à distance visible avec connexion par code",
+  "version": "3.0.0",
+  "description": "Assistance à distance visible avec consentement, chat, fichiers, presse-papiers, audio et diagnostics",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check signaling-server.js && node --check public/app.js",
+    "server": "node signaling-server.js",
     "build": "electron-builder --win nsis",
-    "dist": "npm run build"
+    "dist": "npm run build",
+    "check": "node --check main.js && node --check preload.js && node --check signaling-server.js && node --check public/app.js && node --check public/performance.js",
+    "update-safe": "npm audit fix"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
@@ -22,7 +24,7 @@
   },
   "build": {
     "appId": "fr.madrador.remoteassist",
-    "productName": "RemoteAssist",
+    "productName": "RemoteAssist Ultimate",
     "asar": true,
     "files": [
       "main.js",

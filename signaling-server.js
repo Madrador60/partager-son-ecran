@@ -3,199 +3,210 @@ const http = require("http");
 const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
-const dgram = require("dgram");
 const { Server } = require("socket.io");
 
-const DISCOVERY_PORT = 41234;
+const SESSION_TTL = 10 * 60 * 1000;
+const MAX_CHAT = 2000;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
-function randomCode() {
-  return String(crypto.randomInt(100000000, 999999999));
+function randomDigits(length) {
+  let value = "";
+  for (let i = 0; i < length; i += 1) value += crypto.randomInt(0, 10);
+  return value;
 }
-
-function localIPv4() {
-  const nets = os.networkInterfaces();
-  for (const entries of Object.values(nets)) {
-    for (const entry of entries || []) {
-      if (entry.family === "IPv4" && !entry.internal) return entry.address;
+function getLocalIp() {
+  for (const values of Object.values(os.networkInterfaces())) {
+    for (const item of values || []) {
+      if (item.family === "IPv4" && !item.internal) return item.address;
     }
   }
   return "127.0.0.1";
+}
+function safeText(value, max = MAX_CHAT) {
+  return String(value || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").slice(0, max);
 }
 
 async function startEmbeddedServer() {
   const app = express();
   const server = http.createServer(app);
-  const io = new Server(server, { cors: { origin: "*" } });
+  const io = new Server(server, {
+    cors: { origin: "*" },
+    maxHttpBufferSize: MAX_FILE_BYTES + 1024 * 1024,
+    pingInterval: 10000,
+    pingTimeout: 15000
+  });
   const sessions = new Map();
 
+  app.use(express.json({ limit: "128kb" }));
   app.use(express.static(path.join(__dirname, "public")));
-  app.get("/api/info", (_req, res) => {
-    res.json({ ip: localIPv4(), port: server.address()?.port || null });
+
+  app.get("/api/health", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
+  app.get("/api/local-info", (_req, res) => {
+    const address = server.address();
+    res.json({ ip: getLocalIp(), port: address?.port || null, hostname: os.hostname() });
   });
 
-  io.on("connection", (socket) => {
-    socket.on("host-create", () => {
-      let code;
-      do code = randomCode();
-      while (sessions.has(code));
+  function getSessionForSocket(socketId) {
+    return [...sessions.entries()].find(([, s]) =>
+      s.hostSocketId === socketId || s.approvedViewer === socketId
+    );
+  }
+  function relayToPeer(socket, event, payload) {
+    const entry = getSessionForSocket(socket.id);
+    if (!entry) return;
+    const [code, session] = entry;
+    const peer = socket.id === session.hostSocketId ? session.approvedViewer : session.hostSocketId;
+    if (peer) io.to(peer).emit(event, { ...payload, code });
+  }
 
+  io.on("connection", (socket) => {
+    socket.data.lastInput = 0;
+
+    socket.on("host-create", ({ permissions = {}, deviceName = "" } = {}) => {
+      let code;
+      do code = randomDigits(9); while (sessions.has(code));
+      const expiresAt = Date.now() + SESSION_TTL;
       sessions.set(code, {
         hostSocketId: socket.id,
-        viewerSocketId: null,
-        controlAllowed: false
+        approvedViewer: null,
+        createdAt: Date.now(),
+        expiresAt,
+        deviceName: safeText(deviceName, 80),
+        permissions: {
+          control: Boolean(permissions.control),
+          clipboard: Boolean(permissions.clipboard),
+          files: Boolean(permissions.files),
+          audio: Boolean(permissions.audio)
+        }
       });
-
-      socket.data.hostCode = code;
       socket.join(code);
-      socket.emit("host-created", { code });
+      socket.emit("host-created", { code, expiresAt });
     });
 
-    socket.on("viewer-request", ({ code }) => {
+    socket.on("viewer-request", ({ code, deviceName = "" } = {}) => {
       const session = sessions.get(String(code));
-      if (!session) {
-        socket.emit("viewer-denied", { reason: "Code introuvable sur ce réseau." });
+      if (!session || session.expiresAt < Date.now()) {
+        socket.emit("viewer-denied", { reason: "Code invalide ou expiré." });
         return;
       }
-
       socket.data.pendingCode = String(code);
       io.to(session.hostSocketId).emit("incoming-request", {
         viewerSocketId: socket.id,
-        code: String(code)
+        deviceName: safeText(deviceName, 80)
       });
     });
 
-    socket.on("host-decision", ({ viewerSocketId, approved }) => {
-      const code = socket.data.hostCode;
-      const session = sessions.get(code);
-      if (!session || session.hostSocketId !== socket.id) return;
-
+    socket.on("host-decision", ({ viewerSocketId, approved, permissions = {} } = {}) => {
+      const entry = [...sessions.entries()].find(([, s]) => s.hostSocketId === socket.id);
+      if (!entry) return;
+      const [code, session] = entry;
       if (!approved) {
-        io.to(viewerSocketId).emit("viewer-denied", {
-          reason: "Connexion refusée par le PC distant."
-        });
+        io.to(viewerSocketId).emit("viewer-denied", { reason: "Connexion refusée par le PC distant." });
         return;
       }
-
-      session.viewerSocketId = viewerSocketId;
+      session.approvedViewer = viewerSocketId;
+      session.permissions = {
+        control: Boolean(permissions.control),
+        clipboard: Boolean(permissions.clipboard),
+        files: Boolean(permissions.files),
+        audio: Boolean(permissions.audio)
+      };
       io.sockets.sockets.get(viewerSocketId)?.join(code);
-      io.to(viewerSocketId).emit("viewer-approved", { code });
-      io.to(session.hostSocketId).emit("viewer-ready");
+      io.to(viewerSocketId).emit("viewer-approved", { code, permissions: session.permissions });
+      io.to(session.hostSocketId).emit("viewer-ready", { viewerSocketId });
     });
 
-    socket.on("signal", ({ code, data }) => {
+    socket.on("signal", ({ code, data } = {}) => {
       const session = sessions.get(String(code));
       if (!session) return;
-      const allowed =
-        socket.id === session.hostSocketId ||
-        socket.id === session.viewerSocketId;
-      if (!allowed) return;
+      if (![session.hostSocketId, session.approvedViewer].includes(socket.id)) return;
       socket.to(String(code)).emit("signal", { data });
     });
 
-    socket.on("set-control", ({ code, allowed }) => {
+    socket.on("set-permissions", ({ code, permissions = {} } = {}) => {
       const session = sessions.get(String(code));
-      if (!session || session.hostSocketId !== socket.id) return;
-      session.controlAllowed = Boolean(allowed);
-      if (session.viewerSocketId) {
-        io.to(session.viewerSocketId).emit("control-state", {
-          allowed: session.controlAllowed
-        });
-      }
+      if (!session || socket.id !== session.hostSocketId) return;
+      session.permissions = {
+        control: Boolean(permissions.control),
+        clipboard: Boolean(permissions.clipboard),
+        files: Boolean(permissions.files),
+        audio: Boolean(permissions.audio)
+      };
+      if (session.approvedViewer) io.to(session.approvedViewer).emit("permissions-state", session.permissions);
     });
 
-    socket.on("remote-input", ({ code, payload }) => {
+    socket.on("remote-input", ({ code, payload } = {}) => {
       const session = sessions.get(String(code));
-      if (!session || !session.controlAllowed) return;
-      if (socket.id !== session.viewerSocketId) return;
+      if (!session || !session.permissions.control || socket.id !== session.approvedViewer) return;
+      const now = Date.now();
+      if (payload?.type === "mousemove" && now - socket.data.lastInput < 6) return;
+      socket.data.lastInput = now;
       io.to(session.hostSocketId).emit("remote-input", payload);
+    });
+
+    socket.on("chat-message", ({ text } = {}) => relayToPeer(socket, "chat-message", {
+      text: safeText(text),
+      at: Date.now()
+    }));
+
+    socket.on("clipboard-share", ({ text } = {}) => {
+      const entry = getSessionForSocket(socket.id);
+      if (!entry || !entry[1].permissions.clipboard) return;
+      relayToPeer(socket, "clipboard-share", { text: safeText(text, 100000) });
+    });
+
+    socket.on("file-offer", (payload = {}) => {
+      const entry = getSessionForSocket(socket.id);
+      if (!entry || !entry[1].permissions.files) return;
+      const size = Number(payload.size || 0);
+      if (size <= 0 || size > MAX_FILE_BYTES) return;
+      relayToPeer(socket, "file-offer", {
+        id: safeText(payload.id, 80),
+        name: safeText(payload.name, 200),
+        type: safeText(payload.type, 100),
+        size
+      });
+    });
+    socket.on("file-decision", (payload = {}) => relayToPeer(socket, "file-decision", {
+      id: safeText(payload.id, 80),
+      accepted: Boolean(payload.accepted)
+    }));
+    socket.on("file-data", (payload = {}) => {
+      const entry = getSessionForSocket(socket.id);
+      if (!entry || !entry[1].permissions.files) return;
+      if (!payload.data || Number(payload.size || 0) > MAX_FILE_BYTES) return;
+      relayToPeer(socket, "file-data", payload);
     });
 
     socket.on("disconnect", () => {
       for (const [code, session] of sessions.entries()) {
         if (session.hostSocketId === socket.id) {
-          if (session.viewerSocketId) {
-            io.to(session.viewerSocketId).emit("session-ended");
-          }
+          if (session.approvedViewer) io.to(session.approvedViewer).emit("session-ended");
           sessions.delete(code);
-        } else if (session.viewerSocketId === socket.id) {
-          session.viewerSocketId = null;
-          session.controlAllowed = false;
+        } else if (session.approvedViewer === socket.id) {
+          session.approvedViewer = null;
           io.to(session.hostSocketId).emit("viewer-left");
         }
       }
     });
   });
 
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [code, session] of sessions.entries()) {
+      if (session.expiresAt < now && !session.approvedViewer) {
+        io.to(session.hostSocketId).emit("session-expired");
+        sessions.delete(code);
+      }
+    }
+  }, 30000);
+  server.on("close", () => clearInterval(cleanup));
+
   await new Promise((resolve) => server.listen(0, "0.0.0.0", resolve));
-  const port = server.address().port;
-
-  const discoverySocket = dgram.createSocket("udp4");
-  discoverySocket.on("message", (message, remote) => {
-    try {
-      const data = JSON.parse(message.toString("utf8"));
-      if (data.type !== "REMOTEASSIST_LOOKUP") return;
-
-      const session = sessions.get(String(data.code));
-      if (!session) return;
-
-      const response = Buffer.from(JSON.stringify({
-        type: "REMOTEASSIST_FOUND",
-        code: String(data.code),
-        url: `http://${localIPv4()}:${port}`
-      }));
-
-      discoverySocket.send(response, remote.port, remote.address);
-    } catch {}
-  });
-
-  discoverySocket.bind(DISCOVERY_PORT, "0.0.0.0", () => {
-    discoverySocket.setBroadcast(true);
-  });
-
-  app.post("/api/discover/:code", express.json(), async (req, res) => {
-    const code = String(req.params.code || "").trim();
-    const probe = dgram.createSocket("udp4");
-    const message = Buffer.from(JSON.stringify({
-      type: "REMOTEASSIST_LOOKUP",
-      code
-    }));
-
-    let settled = false;
-    const finish = (payload) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      try { probe.close(); } catch {}
-      res.json(payload);
-    };
-
-    probe.on("message", (buffer) => {
-      try {
-        const data = JSON.parse(buffer.toString("utf8"));
-        if (data.type === "REMOTEASSIST_FOUND" && data.code === code) {
-          finish({ ok: true, url: data.url });
-        }
-      } catch {}
-    });
-
-    probe.bind(0, "0.0.0.0", () => {
-      probe.setBroadcast(true);
-      probe.send(message, DISCOVERY_PORT, "255.255.255.255");
-    });
-
-    const timer = setTimeout(() => finish({
-      ok: false,
-      error: "PC introuvable sur le même réseau."
-    }), 3500);
-  });
-
-  return { server, discoverySocket, port };
+  return { server, port: server.address().port };
 }
 
 if (require.main === module) {
-  startEmbeddedServer().then(({ port }) => {
-    console.log(`RemoteAssist démarré sur le port ${port}`);
-  });
+  startEmbeddedServer().then(({ port }) => console.log(`RemoteAssist: http://0.0.0.0:${port}`));
 }
-
 module.exports = { startEmbeddedServer };

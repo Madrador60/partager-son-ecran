@@ -1,117 +1,59 @@
-<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>RemoteAssist</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo">R</div>
-        <div>
-          <h1>RemoteAssist</h1>
-          <p>Assistance à distance visible et sécurisée</p>
-        </div>
-      </div>
-      <div id="status" class="status"><span></span>Prêt</div>
-    </header>
+<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RemoteAssist Ultimate</title><link rel="stylesheet" href="style.css"></head>
+<body><div class="app">
+<header><div class="brand"><div class="logo">R</div><div><h1>RemoteAssist Ultimate</h1><p id="deviceInfo">Chargement…</p></div></div>
+<div id="status" class="status good">● Prêt</div></header>
 
-    <main>
-      <section class="hero">
-        <div>
-          <span class="eyebrow">VOTRE CODE</span>
-          <div id="hostCode" class="big-code">— — — — — — — — —</div>
-          <p class="hero-copy">Donnez ce code uniquement à la personne autorisée.</p>
-        </div>
-        <button id="createSession" class="primary large">Créer un code</button>
-      </section>
+<nav>
+<button class="tab active" data-view="home">Accueil</button><button class="tab" data-view="session">Session</button>
+<button class="tab" data-view="files">Fichiers</button><button class="tab" data-view="chat">Chat</button>
+<button class="tab" data-view="history">Historique</button><button class="tab" data-view="settings">Réglages</button>
+</nav>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-icon">🖥️</div>
-          <h2>Partager ce PC</h2>
-          <p>Choisissez l’écran puis acceptez la demande de connexion.</p>
-          <button id="chooseScreen" class="secondary">Choisir l’écran</button>
+<main>
+<section id="home" class="view active">
+<div class="hero card"><div><span>VOTRE CODE TEMPORAIRE</span><div id="hostCode" class="code">— — — — — — — — —</div>
+<p>Le code expire automatiquement. La connexion nécessite votre accord visible.</p></div><button id="createCode" class="primary">Créer un code</button></div>
+<div class="columns">
+<article class="card"><h2>Partager ce PC</h2><p>Choisissez un écran puis acceptez la demande.</p>
+<button id="chooseScreen" class="secondary">Choisir l’écran ou la fenêtre</button><div id="selectedSource" class="notice">Aucun écran sélectionné</div></article>
+<article class="card"><h2>Se connecter</h2><p>Entrez le code à 9 chiffres de l’autre PC.</p>
+<input id="remoteCode" placeholder="123 456 789" maxlength="11"><button id="connect" class="primary wide">Envoyer la demande</button>
+<div id="connectMessage" class="notice"></div></article></div>
+</section>
 
-          <label for="qualityProfile">Profil vidéo</label>
-          <select id="qualityProfile">
-            <option value="auto">Automatique</option>
-            <option value="ultra">Ultra fluidité – jusqu’à 120 FPS</option>
-            <option value="balanced">Équilibré – 1080p 60 FPS</option>
-            <option value="quality">Qualité – jusqu’à 1440p 60 FPS</option>
-            <option value="low">Connexion faible – 720p 60 FPS</option>
-          </select>
+<section id="session" class="view">
+<div class="toolbar card"><select id="profile"><option value="auto">Automatique</option><option value="ultra">120 FPS</option>
+<option value="balanced">1080p60</option><option value="quality">1440p60</option><option value="low">720p60</option></select>
+<button id="fullscreen" class="secondary">Plein écran</button><button id="stop" class="danger">Arrêter</button></div>
+<div class="stats card"><div><span>FPS envoyés</span><b id="sent">0</b></div><div><span>FPS reçus</span><b id="recv">0</b></div>
+<div><span>Ping</span><b id="ping">0 ms</b></div><div><span>Débit</span><b id="rate">0 Mb/s</b></div>
+<div><span>Pertes</span><b id="loss">0 %</b></div><div><span>Codec</span><b id="codec">—</b></div><div><span>Résolution</span><b id="resolution">—</b></div></div>
+<div class="video-card card"><video id="remoteVideo" autoplay playsinline tabindex="0"></video><video id="localVideo" autoplay muted playsinline></video></div>
+</section>
 
-          <label class="switch-row">
-            <span><strong>Clavier et souris</strong><small>Désactivable à tout moment.</small></span>
-            <input id="allowControl" type="checkbox">
-          </label>
-          <button id="stopSession" class="danger ghost-danger">Arrêter la session</button>
-        </article>
+<section id="files" class="view"><div class="card"><h2>Transfert de fichiers</h2><p>Maximum 25 Mo par fichier. Le destinataire doit accepter.</p>
+<input id="fileInput" type="file"><button id="sendFile" class="primary">Proposer le fichier</button><div id="fileStatus" class="notice"></div></div></section>
 
-        <article class="panel">
-          <div class="panel-icon">🔗</div>
-          <h2>Se connecter</h2>
-          <p>Entrez le code affiché sur l’autre ordinateur.</p>
-          <label for="remoteCode">Code de connexion</label>
-          <input id="remoteCode" maxlength="11" inputmode="numeric" placeholder="123 456 789">
-          <button id="connect" class="primary">Se connecter</button>
-          <p id="viewerMessage" class="message"></p>
-        </article>
-      </section>
+<section id="chat" class="view"><div class="card chat"><div id="messages"></div><div class="chatbar"><input id="chatInput" placeholder="Votre message…"><button id="sendChat" class="primary">Envoyer</button></div></div></section>
 
-      <section id="sourcePicker" class="source-picker hidden">
-        <div class="section-title">
-          <div><h2>Choisissez l’écran</h2><p>Le partage commencera après acceptation.</p></div>
-          <button id="closePicker" class="icon-btn">×</button>
-        </div>
-        <div id="sourceGrid" class="source-grid"></div>
-      </section>
+<section id="history" class="view"><div class="card"><div class="title-row"><h2>Historique local</h2><button id="clearHistory" class="danger small">Effacer</button></div><div id="historyList"></div></div></section>
 
-      <section class="stats-panel">
-        <div class="stat"><span>FPS envoyés</span><strong id="statSentFps">0</strong></div>
-        <div class="stat"><span>FPS reçus</span><strong id="statRecvFps">0</strong></div>
-        <div class="stat"><span>Ping</span><strong id="statPing">0 ms</strong></div>
-        <div class="stat"><span>Débit</span><strong id="statBitrate">0 Mb/s</strong></div>
-        <div class="stat"><span>Pertes</span><strong id="statLoss">0 %</strong></div>
-        <div class="stat"><span>Codec</span><strong id="statCodec">—</strong></div>
-        <div class="stat"><span>Résolution</span><strong id="statResolution">—</strong></div>
-        <div class="stat"><span>Profil actif</span><strong id="statProfile">Automatique</strong></div>
-      </section>
+<section id="settings" class="view"><div class="columns">
+<div class="card"><h2>Autorisations accordées</h2>
+<label><input id="permControl" type="checkbox"> Clavier et souris</label><label><input id="permClipboard" type="checkbox"> Presse-papiers</label>
+<label><input id="permFiles" type="checkbox"> Transfert de fichiers</label><label><input id="permAudio" type="checkbox"> Audio du système</label>
+<button id="applyPermissions" class="primary wide">Appliquer pendant la session</button></div>
+<div class="card"><h2>Presse-papiers</h2><textarea id="clipboardText" placeholder="Texte à partager"></textarea>
+<button id="readClipboard" class="secondary">Lire mon presse-papiers</button><button id="shareClipboard" class="primary wide">Partager avec confirmation activée</button></div></div></section>
+</main></div>
 
-      <section class="screen-stage">
-        <div class="stage-head">
-          <div><h2>Écran distant</h2><p id="stageHint">Aucune connexion active</p></div>
-          <div class="stage-actions">
-            <span id="networkBadge" class="badge good">Réseau prêt</span>
-            <span id="controlBadge" class="badge off">Contrôle désactivé</span>
-            <button id="fullscreenBtn" class="secondary compact">Plein écran</button>
-          </div>
-        </div>
-        <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
-        <video id="localVideo" autoplay muted playsinline></video>
-      </section>
-    </main>
-  </div>
+<div id="picker" class="modal hidden"><div class="modal-card wide-modal"><div class="title-row"><h2>Choisir la source</h2><button id="closePicker">×</button></div><div id="sourceGrid" class="sources"></div></div></div>
+<div id="incoming" class="modal hidden"><div class="modal-card"><h2>Demande de connexion</h2><p id="requester">Un ordinateur veut se connecter.</p>
+<div class="permissions"><label><input id="acceptControl" type="checkbox"> Autoriser le contrôle</label><label><input id="acceptClipboard" type="checkbox"> Autoriser le presse-papiers</label>
+<label><input id="acceptFiles" type="checkbox"> Autoriser les fichiers</label><label><input id="acceptAudio" type="checkbox"> Autoriser l’audio</label></div>
+<div class="actions"><button id="deny" class="danger">Refuser</button><button id="accept" class="primary">Oui, accepter</button></div></div></div>
+<div id="fileOffer" class="modal hidden"><div class="modal-card"><h2>Fichier proposé</h2><p id="fileOfferText"></p><div class="actions">
+<button id="declineFile" class="danger">Refuser</button><button id="acceptFile" class="primary">Accepter</button></div></div></div>
 
-  <div id="incoming" class="modal hidden">
-    <div class="modal-card">
-      <div class="request-icon">👤</div>
-      <h2>Demande de connexion</h2>
-      <p>Un autre ordinateur veut accéder à votre écran.</p>
-      <p class="security-note">La connexion commence uniquement après votre accord.</p>
-      <div class="modal-actions">
-        <button id="refuse" class="danger">Refuser</button>
-        <button id="accept" class="primary">Oui, accepter</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="performance.js"></script>
-  <script src="app.js"></script>
-</body>
-</html>
+<script src="/socket.io/socket.io.js"></script><script src="performance.js"></script><script src="app.js"></script></body></html>

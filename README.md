@@ -1,48 +1,38 @@
-# RemoteAssist
+# RemoteAssist Ultimate V3
 
-Application Windows d’assistance à distance avec :
+Application d’assistance à distance visible avec consentement explicite.
 
-- identifiant de session ;
-- mot de passe temporaire ;
-- validation visible avant connexion ;
-- choix manuel de l’écran ;
-- partage vidéo jusqu’à 60 images/seconde selon la machine et le réseau ;
-- contrôle clavier/souris désactivé par défaut ;
-- bouton visible pour autoriser ou couper le contrôle ;
-- installateur Windows `.exe`.
+## Fonctions intégrées
+
+- code temporaire à 9 chiffres ;
+- demande d’autorisation visible ;
+- partage d’écran ou de fenêtre ;
+- contrôle clavier/souris facultatif ;
+- profils 720p60, 1080p60, 1080p120 cible et 1440p60 ;
+- adaptation automatique au réseau ;
+- statistiques FPS, ping, débit, pertes, codec et résolution ;
+- chat ;
+- presse-papiers autorisé séparément ;
+- transfert de fichiers avec proposition et acceptation, limité à 25 Mo ;
+- plusieurs écrans via le sélecteur de sources ;
+- capture audio facultative selon la prise en charge Windows/Electron ;
+- historique local ;
+- expiration du code ;
+- sauvegarde de l’ancien app.js pendant l’installation.
 
 ## Installation
 
-1. Installe Node.js LTS.
-2. Double-clique sur `INSTALLER-ET-CREER-EXE.bat`.
-3. Récupère l’installateur dans le dossier `dist`.
-4. Installe le même `.exe` sur les deux PC.
+1. Installer Node.js.
+2. Lancer `INSTALLER-MISE-A-JOUR-TOTALE.bat`.
+3. Lancer `LANCER-EN-TEST.bat`.
+4. Pour créer l’installateur Windows : `INSTALLER-ET-CREER-EXE.bat`.
 
-## Utilisation
+## Limites honnêtes
 
-### PC à contrôler
+Cette version est une application Electron/WebRTC complète, mais ce n’est pas encore
+un moteur natif équivalent à AnyDesk. Le vrai 120 FPS constant et la latence minimale
+nécessitent un module Windows natif Direct3D avec NVENC, AMF ou Quick Sync, ainsi
+qu’un serveur public de signalisation et TURN pour les connexions Internet hors LAN.
 
-1. Ouvre RemoteAssist.
-2. Clique sur **Créer une session**.
-3. Clique sur **Choisir l’écran à partager**.
-4. Transmets l’adresse locale, l’identifiant et le mot de passe.
-5. Accepte la demande de connexion.
-6. Coche **Autoriser clavier et souris** seulement si tu veux donner le contrôle.
-
-### Deuxième PC
-
-1. Ouvre RemoteAssist.
-2. Entre l’adresse du premier PC.
-3. Entre son identifiant et son mot de passe.
-4. Clique sur **Demander la connexion**.
-5. Attends que le premier PC accepte.
-
-## Sécurité et limites
-
-- Aucun fonctionnement caché.
-- Aucun démarrage automatique silencieux.
-- Aucun contournement des autorisations Windows ou de l’UAC.
-- Le contrôle est visible et désactivé par défaut.
-- Cette version est prévue d’abord pour le même réseau local.
-- Pour fonctionner facilement par Internet, il faut ajouter un serveur public HTTPS et un relais TURN.
-- Certaines touches spéciales et certains écrans administrateur Windows peuvent rester inaccessibles.
+Aucun accès caché, aucune connexion silencieuse et aucun contournement des autorisations
+Windows ne sont inclus.

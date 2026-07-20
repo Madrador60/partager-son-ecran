@@ -1,19 +1,21 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, clipboard, dialog, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 const { startEmbeddedServer } = require("./signaling-server");
 
-let embedded = null;
+let mainWindow;
+let embedded;
 let controlEnabled = false;
 
 function createWindow(port) {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 860,
+  mainWindow = new BrowserWindow({
+    width: 1380,
+    height: 900,
     minWidth: 980,
     minHeight: 680,
-    title: "RemoteAssist",
-    backgroundColor: "#07111f",
-    autoHideMenuBar: true,
+    title: "RemoteAssist Ultimate",
+    backgroundColor: "#06101c",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -21,31 +23,36 @@ function createWindow(port) {
       sandbox: false
     }
   });
-
-  win.loadURL(`http://127.0.0.1:${port}`);
+  mainWindow.loadURL(`http://127.0.0.1:${port}`);
 }
-
 app.whenReady().then(async () => {
   embedded = await startEmbeddedServer();
   createWindow(embedded.port);
 });
-
 app.on("window-all-closed", () => {
-  if (embedded?.server) embedded.server.close();
-  if (embedded?.discoverySocket) embedded.discoverySocket.close();
+  embedded?.server?.close();
   if (process.platform !== "darwin") app.quit();
 });
+
+ipcMain.handle("system-info", () => ({
+  hostname: os.hostname(),
+  platform: os.platform(),
+  release: os.release(),
+  memoryGb: Math.round(os.totalmem() / 1073741824),
+  displays: screen.getAllDisplays().length
+}));
 
 ipcMain.handle("list-sources", async () => {
   const sources = await desktopCapturer.getSources({
     types: ["screen", "window"],
-    thumbnailSize: { width: 440, height: 250 }
+    thumbnailSize: { width: 460, height: 260 },
+    fetchWindowIcons: true
   });
-
   return sources.map((source) => ({
     id: source.id,
     name: source.name,
-    thumbnail: source.thumbnail.toDataURL()
+    thumbnail: source.thumbnail.toDataURL(),
+    appIcon: source.appIcon?.toDataURL() || null
   }));
 });
 
@@ -53,47 +60,49 @@ ipcMain.handle("set-control-enabled", (_event, enabled) => {
   controlEnabled = Boolean(enabled);
   return { ok: true, enabled: controlEnabled };
 });
+ipcMain.handle("clipboard-read", () => clipboard.readText());
+ipcMain.handle("clipboard-write", (_event, text) => {
+  clipboard.writeText(String(text || ""));
+  return { ok: true };
+});
+ipcMain.handle("save-received-file", async (_event, { name, data }) => {
+  const result = await dialog.showSaveDialog(mainWindow, { defaultPath: name });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(result.filePath, Buffer.from(data));
+  return { ok: true, path: result.filePath };
+});
+ipcMain.handle("open-path", (_event, filePath) => shell.showItemInFolder(filePath));
 
 ipcMain.handle("remote-input", async (_event, payload) => {
   if (!controlEnabled) return { ok: false, error: "Contrôle non autorisé" };
-
   try {
     const { mouse, keyboard, Button, Key, Point } = require("@nut-tree-fork/nut-js");
     const display = screen.getPrimaryDisplay();
     const width = display.bounds.width;
     const height = display.bounds.height;
-
     if (payload.type === "mousemove") {
-      const x = Math.max(0, Math.min(width - 1, Math.round(payload.x * width)));
-      const y = Math.max(0, Math.min(height - 1, Math.round(payload.y * height)));
-      await mouse.setPosition(new Point(x, y));
-    }
-
-    if (payload.type === "mousedown" || payload.type === "mouseup") {
+      await mouse.setPosition(new Point(
+        Math.max(0, Math.min(width - 1, Math.round(payload.x * width))),
+        Math.max(0, Math.min(height - 1, Math.round(payload.y * height)))
+      ));
+    } else if (payload.type === "mousedown" || payload.type === "mouseup") {
       const button = payload.button === 2 ? Button.RIGHT : Button.LEFT;
       if (payload.type === "mousedown") await mouse.pressButton(button);
       else await mouse.releaseButton(button);
-    }
-
-    if (payload.type === "wheel") {
-      const amount = Math.min(12, Math.max(1, Math.round(Math.abs(payload.deltaY) / 90)));
+    } else if (payload.type === "wheel") {
+      const amount = Math.min(12, Math.max(1, Math.round(Math.abs(payload.deltaY) / 80)));
       if (payload.deltaY < 0) await mouse.scrollUp(amount);
       else await mouse.scrollDown(amount);
-    }
-
-    if (payload.type === "keydown") {
+    } else if (payload.type === "keydown") {
       const map = {
-        Enter: Key.ENTER, Escape: Key.ESCAPE, Backspace: Key.BACKSPACE,
-        Tab: Key.TAB, ArrowUp: Key.UP, ArrowDown: Key.DOWN,
-        ArrowLeft: Key.LEFT, ArrowRight: Key.RIGHT, Delete: Key.DELETE,
-        " ": Key.SPACE
+        Enter: Key.ENTER, Escape: Key.ESCAPE, Backspace: Key.BACKSPACE, Tab: Key.TAB,
+        ArrowUp: Key.UP, ArrowDown: Key.DOWN, ArrowLeft: Key.LEFT, ArrowRight: Key.RIGHT,
+        Delete: Key.DELETE, " ": Key.SPACE, Home: Key.HOME, End: Key.END,
+        PageUp: Key.PAGE_UP, PageDown: Key.PAGE_DOWN
       };
       if (map[payload.key]) await keyboard.type(map[payload.key]);
-      else if (typeof payload.key === "string" && payload.key.length === 1) {
-        await keyboard.type(payload.key);
-      }
+      else if (typeof payload.key === "string" && payload.key.length === 1) await keyboard.type(payload.key);
     }
-
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.message };
