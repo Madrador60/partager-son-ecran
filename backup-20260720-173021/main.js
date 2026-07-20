@@ -2,18 +2,17 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require("electr
 const path = require("path");
 const { startEmbeddedServer } = require("./signaling-server");
 
+let mainWindow = null;
 let embedded = null;
 let controlEnabled = false;
 
 function createWindow(port) {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 980,
-    minHeight: 680,
+  mainWindow = new BrowserWindow({
+    width: 1220,
+    height: 820,
+    minWidth: 940,
+    minHeight: 650,
     title: "RemoteAssist",
-    backgroundColor: "#07111f",
-    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -22,7 +21,7 @@ function createWindow(port) {
     }
   });
 
-  win.loadURL(`http://127.0.0.1:${port}`);
+  mainWindow.loadURL(`http://127.0.0.1:${port}`);
 }
 
 app.whenReady().then(async () => {
@@ -32,17 +31,16 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (embedded?.server) embedded.server.close();
-  if (embedded?.discoverySocket) embedded.discoverySocket.close();
   if (process.platform !== "darwin") app.quit();
 });
 
 ipcMain.handle("list-sources", async () => {
   const sources = await desktopCapturer.getSources({
     types: ["screen", "window"],
-    thumbnailSize: { width: 440, height: 250 }
+    thumbnailSize: { width: 420, height: 240 }
   });
 
-  return sources.map((source) => ({
+  return sources.map(source => ({
     id: source.id,
     name: source.name,
     thumbnail: source.thumbnail.toDataURL()
@@ -76,19 +74,26 @@ ipcMain.handle("remote-input", async (_event, payload) => {
     }
 
     if (payload.type === "wheel") {
-      const amount = Math.min(12, Math.max(1, Math.round(Math.abs(payload.deltaY) / 90)));
+      const amount = Math.min(10, Math.max(1, Math.round(Math.abs(payload.deltaY) / 100)));
       if (payload.deltaY < 0) await mouse.scrollUp(amount);
       else await mouse.scrollDown(amount);
     }
 
     if (payload.type === "keydown") {
-      const map = {
-        Enter: Key.ENTER, Escape: Key.ESCAPE, Backspace: Key.BACKSPACE,
-        Tab: Key.TAB, ArrowUp: Key.UP, ArrowDown: Key.DOWN,
-        ArrowLeft: Key.LEFT, ArrowRight: Key.RIGHT, Delete: Key.DELETE,
-        " ": Key.SPACE
+      const keyMap = {
+        Enter: Key.ENTER,
+        Escape: Key.ESCAPE,
+        Backspace: Key.BACKSPACE,
+        Tab: Key.TAB,
+        ArrowUp: Key.UP,
+        ArrowDown: Key.DOWN,
+        ArrowLeft: Key.LEFT,
+        ArrowRight: Key.RIGHT,
+        Delete: Key.DELETE,
+        Space: Key.SPACE
       };
-      if (map[payload.key]) await keyboard.type(map[payload.key]);
+      const mapped = keyMap[payload.key];
+      if (mapped) await keyboard.type(mapped);
       else if (typeof payload.key === "string" && payload.key.length === 1) {
         await keyboard.type(payload.key);
       }

@@ -7,74 +7,97 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>RemoteAssist</h1>
-        <p>Assistance à distance avec autorisation visible</p>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">R</div>
+        <div>
+          <h1>RemoteAssist</h1>
+          <p>Simple, rapide et toujours visible</p>
+        </div>
       </div>
-      <div id="status" class="status">Prêt</div>
+      <div id="status" class="status ready"><span></span> Prêt</div>
     </header>
 
-    <section class="columns">
-      <article class="card">
-        <h2>Autoriser l’accès à ce PC</h2>
-        <button id="createSession">Créer une session</button>
-
-        <div class="credentials">
-          <label>Identifiant</label>
-          <div id="hostId" class="value">—</div>
-          <label>Mot de passe temporaire</label>
-          <div id="hostPassword" class="value">—</div>
-          <label>Adresse locale</label>
-          <div id="localUrl" class="small">—</div>
+    <main>
+      <section class="hero">
+        <div>
+          <span class="eyebrow">VOTRE CODE</span>
+          <div id="hostCode" class="big-code">— — — — — — — — —</div>
+          <p class="hero-copy">Donnez uniquement ce code à la personne qui doit se connecter.</p>
         </div>
+        <button id="createSession" class="primary large">Créer un code</button>
+      </section>
 
-        <button id="chooseScreen">Choisir l’écran à partager</button>
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-icon">🖥️</div>
+          <h2>Autoriser l’accès à ce PC</h2>
+          <p>Créez un code puis choisissez l’écran à partager.</p>
 
-        <label class="toggle">
-          <input id="allowControl" type="checkbox">
-          <span>Autoriser clavier et souris</span>
-        </label>
+          <button id="chooseScreen" class="secondary">Choisir l’écran</button>
 
-        <button id="stopSession" class="danger">Arrêter la session</button>
-        <p class="hint">Le contrôle reste désactivé tant que cette case n’est pas cochée.</p>
-      </article>
+          <label class="switch-row">
+            <span>
+              <strong>Clavier et souris</strong>
+              <small>Vous pouvez couper le contrôle à tout moment.</small>
+            </span>
+            <input id="allowControl" type="checkbox">
+          </label>
 
-      <article class="card">
-        <h2>Accéder à un autre PC</h2>
+          <button id="stopSession" class="danger ghost-danger">Arrêter la session</button>
+        </article>
 
-        <label>Adresse du logiciel distant</label>
-        <input id="serverUrl" placeholder="http://192.168.1.20:12345">
+        <article class="panel">
+          <div class="panel-icon">🔗</div>
+          <h2>Se connecter à un autre PC</h2>
+          <p>Entrez simplement le code affiché sur l’autre ordinateur.</p>
 
-        <label>Identifiant</label>
-        <input id="remoteId" inputmode="numeric" placeholder="123456789">
+          <label for="remoteCode">Code de connexion</label>
+          <input id="remoteCode" maxlength="9" inputmode="numeric" placeholder="123 456 789">
 
-        <label>Mot de passe</label>
-        <input id="remotePassword" type="password" inputmode="numeric" placeholder="123456">
+          <button id="connect" class="primary">Se connecter</button>
+          <p id="viewerMessage" class="message"></p>
+        </article>
+      </section>
 
-        <button id="connect">Demander la connexion</button>
-        <p id="viewerMessage" class="hint"></p>
-      </article>
-    </section>
-
-    <section id="incoming" class="modal hidden">
-      <div class="modal-card">
-        <h2>Demande de connexion</h2>
-        <p>Un autre ordinateur demande à voir votre écran.</p>
-        <div class="modal-actions">
-          <button id="accept">Accepter</button>
-          <button id="refuse" class="danger">Refuser</button>
+      <section id="sourcePicker" class="source-picker hidden">
+        <div class="section-title">
+          <div>
+            <h2>Choisissez l’écran</h2>
+            <p>Le partage commencera immédiatement après votre choix.</p>
+          </div>
+          <button id="closePicker" class="icon-btn">×</button>
         </div>
+        <div id="sourceGrid" class="source-grid"></div>
+      </section>
+
+      <section class="screen-stage">
+        <div class="stage-head">
+          <div>
+            <h2>Écran distant</h2>
+            <p id="stageHint">Aucune connexion active</p>
+          </div>
+          <span id="controlBadge" class="badge off">Contrôle désactivé</span>
+        </div>
+        <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
+        <video id="localVideo" autoplay muted playsinline></video>
+      </section>
+    </main>
+  </div>
+
+  <div id="incoming" class="modal hidden">
+    <div class="modal-card">
+      <div class="request-icon">👤</div>
+      <h2>Demande de connexion</h2>
+      <p>Un autre ordinateur veut accéder à votre écran.</p>
+      <p class="security-note">La connexion ne commencera qu’après votre accord.</p>
+      <div class="modal-actions">
+        <button id="refuse" class="danger">Refuser</button>
+        <button id="accept" class="primary">Oui, accepter</button>
       </div>
-    </section>
-
-    <section class="viewer">
-      <div id="sourcePicker" class="source-grid hidden"></div>
-      <video id="localVideo" autoplay muted playsinline></video>
-      <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>

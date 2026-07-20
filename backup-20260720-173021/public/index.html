@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RemoteAssist</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>RemoteAssist</h1>
+        <p>Assistance à distance avec autorisation visible</p>
+      </div>
+      <div id="status" class="status">Prêt</div>
+    </header>
+
+    <section class="columns">
+      <article class="card">
+        <h2>Autoriser l’accès à ce PC</h2>
+        <button id="createSession">Créer une session</button>
+
+        <div class="credentials">
+          <label>Identifiant</label>
+          <div id="hostId" class="value">—</div>
+          <label>Mot de passe temporaire</label>
+          <div id="hostPassword" class="value">—</div>
+          <label>Adresse locale</label>
+          <div id="localUrl" class="small">—</div>
+        </div>
+
+        <button id="chooseScreen">Choisir l’écran à partager</button>
+
+        <label class="toggle">
+          <input id="allowControl" type="checkbox">
+          <span>Autoriser clavier et souris</span>
+        </label>
+
+        <button id="stopSession" class="danger">Arrêter la session</button>
+        <p class="hint">Le contrôle reste désactivé tant que cette case n’est pas cochée.</p>
+      </article>
+
+      <article class="card">
+        <h2>Accéder à un autre PC</h2>
+
+        <label>Adresse du logiciel distant</label>
+        <input id="serverUrl" placeholder="http://192.168.1.20:12345">
+
+        <label>Identifiant</label>
+        <input id="remoteId" inputmode="numeric" placeholder="123456789">
+
+        <label>Mot de passe</label>
+        <input id="remotePassword" type="password" inputmode="numeric" placeholder="123456">
+
+        <button id="connect">Demander la connexion</button>
+        <p id="viewerMessage" class="hint"></p>
+      </article>
+    </section>
+
+    <section id="incoming" class="modal hidden">
+      <div class="modal-card">
+        <h2>Demande de connexion</h2>
+        <p>Un autre ordinateur demande à voir votre écran.</p>
+        <div class="modal-actions">
+          <button id="accept">Accepter</button>
+          <button id="refuse" class="danger">Refuser</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="viewer">
+      <div id="sourcePicker" class="source-grid hidden"></div>
+      <video id="localVideo" autoplay muted playsinline></video>
+      <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
+    </section>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

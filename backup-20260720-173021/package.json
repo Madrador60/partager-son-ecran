@@ -1,12 +1,12 @@
 {
   "name": "remoteassist-complete",
-  "version": "2.0.0",
-  "description": "Assistance à distance visible avec connexion par code",
+  "version": "1.0.0",
+  "description": "Assistance à distance avec consentement visible",
   "main": "main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check signaling-server.js && node --check public/app.js",
+    "server": "node signaling-server.js",
     "build": "electron-builder --win nsis",
     "dist": "npm run build"
   },

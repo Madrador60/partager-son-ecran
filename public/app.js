@@ -1,46 +1,49 @@
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-let hostSocket = io();
+const hostSocket = io();
 let viewerSocket = null;
-let hostSessionId = null;
+let hostCode = null;
 let pendingViewerSocketId = null;
 let localStream = null;
-let peer = null;
+let hostPeer = null;
 let viewerPeer = null;
+let viewerCode = null;
 let controlAllowed = false;
 
 function setStatus(text) {
-  $("status").textContent = text;
+  $("status").innerHTML = `<span></span>${text}`;
 }
 
-async function loadLocalInfo() {
-  const info = await fetch("/api/local-info").then(r => r.json());
-  $("localUrl").textContent = `http://${info.ip}:${info.port}`;
+function formatCode(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ");
 }
-loadLocalInfo();
+
+$("remoteCode").addEventListener("input", (event) => {
+  event.target.value = formatCode(event.target.value);
+});
 
 $("createSession").onclick = () => {
   hostSocket.emit("host-create");
+  setStatus("Création du code…");
 };
 
-hostSocket.on("host-created", ({ id, password }) => {
-  hostSessionId = id;
-  $("hostId").textContent = id;
-  $("hostPassword").textContent = password;
-  setStatus("Session créée");
+hostSocket.on("host-created", ({ code }) => {
+  hostCode = code;
+  $("hostCode").textContent = formatCode(code);
+  setStatus("Code prêt");
 });
 
 $("chooseScreen").onclick = async () => {
   const sources = await window.remoteAssist.listSources();
-  const container = $("sourcePicker");
-  container.innerHTML = "";
-  container.classList.remove("hidden");
+  const grid = $("sourceGrid");
+  grid.innerHTML = "";
+  $("sourcePicker").classList.remove("hidden");
 
   for (const source of sources) {
-    const card = document.createElement("button");
-    card.className = "source";
-    card.innerHTML = `<img src="${source.thumbnail}" alt=""><strong>${source.name}</strong>`;
-    card.onclick = async () => {
+    const button = document.createElement("button");
+    button.className = "source";
+    button.innerHTML = `<img src="${source.thumbnail}" alt=""><strong>${source.name}</strong>`;
+    button.onclick = async () => {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -54,21 +57,24 @@ $("chooseScreen").onclick = async () => {
         });
 
         $("localVideo").srcObject = localStream;
-        container.classList.add("hidden");
+        $("sourcePicker").classList.add("hidden");
+        $("stageHint").textContent = "Écran prêt à être partagé";
         setStatus("Écran prêt");
-
         localStream.getVideoTracks()[0].onended = stopAll;
-      } catch (error) {
+      } catch {
         setStatus("Partage refusé");
       }
     };
-    container.appendChild(card);
+    grid.appendChild(button);
   }
 };
+
+$("closePicker").onclick = () => $("sourcePicker").classList.add("hidden");
 
 hostSocket.on("incoming-request", ({ viewerSocketId }) => {
   pendingViewerSocketId = viewerSocketId;
   $("incoming").classList.remove("hidden");
+  setStatus("Demande reçue");
 });
 
 $("accept").onclick = () => {
@@ -86,135 +92,168 @@ $("refuse").onclick = () => {
     viewerSocketId: pendingViewerSocketId,
     approved: false
   });
+  setStatus("Connexion refusée");
 };
 
-function createPeer(socket, roomId, isHost) {
-  const pc = new RTCPeerConnection({
+function createPeer(socket, code, isHost) {
+  const peer = new RTCPeerConnection({
     iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
   });
 
-  pc.onicecandidate = event => {
+  peer.onicecandidate = (event) => {
     if (event.candidate) {
       socket.emit("signal", {
-        id: roomId,
+        code,
         data: { type: "candidate", candidate: event.candidate }
       });
     }
   };
 
-  pc.onconnectionstatechange = () => setStatus(pc.connectionState);
+  peer.onconnectionstatechange = () => {
+    setStatus(peer.connectionState === "connected" ? "Connecté" : peer.connectionState);
+  };
 
   if (!isHost) {
-    pc.ontrack = event => {
+    peer.ontrack = (event) => {
       $("remoteVideo").srcObject = event.streams[0];
       $("remoteVideo").focus();
-      setStatus("Connecté");
+      $("stageHint").textContent = "Connexion active";
     };
   }
 
-  return pc;
+  return peer;
 }
 
 hostSocket.on("viewer-ready", async () => {
-  if (!hostSessionId || !localStream) {
-    setStatus("Choisis d’abord un écran");
+  if (!hostCode || !localStream) {
+    setStatus("Choisissez d’abord un écran");
     return;
   }
 
-  peer = createPeer(hostSocket, hostSessionId, true);
-  localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+  hostPeer = createPeer(hostSocket, hostCode, true);
+  for (const track of localStream.getTracks()) {
+    hostPeer.addTrack(track, localStream);
+  }
 
-  const offer = await peer.createOffer();
-  await peer.setLocalDescription(offer);
+  const offer = await hostPeer.createOffer({
+    offerToReceiveVideo: false,
+    offerToReceiveAudio: false
+  });
+  await hostPeer.setLocalDescription(offer);
 
   hostSocket.emit("signal", {
-    id: hostSessionId,
-    data: { type: "offer", sdp: peer.localDescription }
+    code: hostCode,
+    data: { type: "offer", sdp: hostPeer.localDescription }
   });
 });
 
 hostSocket.on("signal", async ({ data }) => {
-  if (!peer) return;
-  if (data.type === "answer") await peer.setRemoteDescription(data.sdp);
-  if (data.type === "candidate") await peer.addIceCandidate(data.candidate);
+  if (!hostPeer) return;
+  if (data.type === "answer") await hostPeer.setRemoteDescription(data.sdp);
+  if (data.type === "candidate") await hostPeer.addIceCandidate(data.candidate);
 });
 
-$("allowControl").onchange = async event => {
+$("allowControl").onchange = async (event) => {
   controlAllowed = event.target.checked;
   await window.remoteAssist.setControlEnabled(controlAllowed);
 
-  if (hostSessionId) {
+  if (hostCode) {
     hostSocket.emit("set-control", {
-      id: hostSessionId,
+      code: hostCode,
       allowed: controlAllowed
     });
   }
 
+  $("controlBadge").textContent = controlAllowed ? "Contrôle autorisé" : "Contrôle désactivé";
+  $("controlBadge").className = `badge ${controlAllowed ? "on" : "off"}`;
   setStatus(controlAllowed ? "Contrôle autorisé" : "Contrôle désactivé");
 };
 
-hostSocket.on("remote-input", payload => {
+hostSocket.on("remote-input", (payload) => {
   window.remoteAssist.sendRemoteInput(payload);
 });
 
-$("connect").onclick = () => {
-  const base = $("serverUrl").value.trim().replace(/\/$/, "");
-  const id = $("remoteId").value.trim();
-  const password = $("remotePassword").value.trim();
+$("connect").onclick = async () => {
+  viewerCode = $("remoteCode").value.replace(/\D/g, "");
 
-  if (!base || !id || !password) {
-    $("viewerMessage").textContent = "Remplis l’adresse, l’identifiant et le mot de passe.";
+  if (viewerCode.length !== 9) {
+    $("viewerMessage").textContent = "Entrez un code à 9 chiffres.";
     return;
   }
 
-  viewerSocket = io(base, { transports: ["websocket", "polling"] });
+  $("viewerMessage").textContent = "Recherche du PC…";
+  setStatus("Recherche…");
 
-  viewerSocket.on("connect", () => {
-    viewerSocket.emit("viewer-request", { id, password });
-    $("viewerMessage").textContent = "Demande envoyée. Attends l’acceptation.";
-  });
+  try {
+    const result = await fetch(`/api/discover/${viewerCode}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    }).then((response) => response.json());
 
-  viewerSocket.on("connect_error", error => {
-    $("viewerMessage").textContent = "Connexion impossible : " + error.message;
-  });
-
-  viewerSocket.on("viewer-denied", ({ reason }) => {
-    $("viewerMessage").textContent = reason;
-  });
-
-  viewerSocket.on("viewer-approved", async ({ id: approvedId }) => {
-    viewerPeer = createPeer(viewerSocket, approvedId, false);
-    $("viewerMessage").textContent = "Connexion acceptée.";
-  });
-
-  viewerSocket.on("signal", async ({ data }) => {
-    if (!viewerPeer) return;
-
-    if (data.type === "offer") {
-      await viewerPeer.setRemoteDescription(data.sdp);
-      const answer = await viewerPeer.createAnswer();
-      await viewerPeer.setLocalDescription(answer);
-
-      viewerSocket.emit("signal", {
-        id,
-        data: { type: "answer", sdp: viewerPeer.localDescription }
-      });
+    if (!result.ok) {
+      $("viewerMessage").textContent = result.error;
+      setStatus("PC introuvable");
+      return;
     }
 
-    if (data.type === "candidate") {
-      await viewerPeer.addIceCandidate(data.candidate);
-    }
-  });
+    viewerSocket = io(result.url, { transports: ["websocket", "polling"] });
 
-  viewerSocket.on("control-state", ({ allowed }) => {
-    controlAllowed = allowed;
-    $("viewerMessage").textContent = allowed
-      ? "Le contrôle clavier/souris est autorisé."
-      : "Le contrôle clavier/souris est désactivé.";
-  });
+    viewerSocket.on("connect", () => {
+      viewerSocket.emit("viewer-request", { code: viewerCode });
+      $("viewerMessage").textContent = "Demande envoyée. Cliquez sur Oui sur l’autre PC.";
+    });
+
+    viewerSocket.on("viewer-denied", ({ reason }) => {
+      $("viewerMessage").textContent = reason;
+      setStatus("Connexion refusée");
+    });
+
+    viewerSocket.on("viewer-approved", async ({ code }) => {
+      viewerPeer = createPeer(viewerSocket, code, false);
+      $("viewerMessage").textContent = "Connexion acceptée.";
+      setStatus("Connexion acceptée");
+    });
+
+    viewerSocket.on("signal", async ({ data }) => {
+      if (!viewerPeer) return;
+
+      if (data.type === "offer") {
+        await viewerPeer.setRemoteDescription(data.sdp);
+        const answer = await viewerPeer.createAnswer();
+        await viewerPeer.setLocalDescription(answer);
+
+        viewerSocket.emit("signal", {
+          code: viewerCode,
+          data: { type: "answer", sdp: viewerPeer.localDescription }
+        });
+      }
+
+      if (data.type === "candidate") {
+        await viewerPeer.addIceCandidate(data.candidate);
+      }
+    });
+
+    viewerSocket.on("control-state", ({ allowed }) => {
+      controlAllowed = allowed;
+      $("controlBadge").textContent = allowed ? "Contrôle autorisé" : "Contrôle désactivé";
+      $("controlBadge").className = `badge ${allowed ? "on" : "off"}`;
+      $("viewerMessage").textContent = allowed
+        ? "Vous pouvez utiliser le clavier et la souris."
+        : "Le PC distant n’a pas autorisé le contrôle.";
+    });
+
+    viewerSocket.on("session-ended", () => {
+      $("viewerMessage").textContent = "La session distante a été arrêtée.";
+      stopAll();
+    });
+  } catch (error) {
+    $("viewerMessage").textContent = "Erreur de recherche : " + error.message;
+    setStatus("Erreur");
+  }
 };
 
-function normalizedPosition(event) {
+function positionFromEvent(event) {
   const rect = $("remoteVideo").getBoundingClientRect();
   return {
     x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
@@ -222,55 +261,64 @@ function normalizedPosition(event) {
   };
 }
 
-$("remoteVideo").addEventListener("mousemove", event => {
-  if (!viewerSocket || !controlAllowed) return;
-  const pos = normalizedPosition(event);
+$("remoteVideo").addEventListener("mousemove", (event) => {
+  if (!viewerSocket || !controlAllowed || !viewerCode) return;
   viewerSocket.emit("remote-input", {
-    id: $("remoteId").value.trim(),
-    payload: { type: "mousemove", ...pos }
+    code: viewerCode,
+    payload: { type: "mousemove", ...positionFromEvent(event) }
   });
 });
 
 for (const type of ["mousedown", "mouseup"]) {
-  $("remoteVideo").addEventListener(type, event => {
-    if (!viewerSocket || !controlAllowed) return;
+  $("remoteVideo").addEventListener(type, (event) => {
+    if (!viewerSocket || !controlAllowed || !viewerCode) return;
     viewerSocket.emit("remote-input", {
-      id: $("remoteId").value.trim(),
+      code: viewerCode,
       payload: { type, button: event.button }
     });
   });
 }
 
-$("remoteVideo").addEventListener("wheel", event => {
-  if (!viewerSocket || !controlAllowed) return;
+$("remoteVideo").addEventListener("contextmenu", (event) => event.preventDefault());
+
+$("remoteVideo").addEventListener("wheel", (event) => {
+  if (!viewerSocket || !controlAllowed || !viewerCode) return;
   event.preventDefault();
   viewerSocket.emit("remote-input", {
-    id: $("remoteId").value.trim(),
+    code: viewerCode,
     payload: { type: "wheel", deltaY: event.deltaY }
   });
 }, { passive: false });
 
-$("remoteVideo").addEventListener("keydown", event => {
-  if (!viewerSocket || !controlAllowed) return;
+$("remoteVideo").addEventListener("keydown", (event) => {
+  if (!viewerSocket || !controlAllowed || !viewerCode) return;
   event.preventDefault();
   viewerSocket.emit("remote-input", {
-    id: $("remoteId").value.trim(),
+    code: viewerCode,
     payload: { type: "keydown", key: event.key }
   });
 });
 
 function stopAll() {
-  if (localStream) localStream.getTracks().forEach(track => track.stop());
-  if (peer) peer.close();
+  if (localStream) localStream.getTracks().forEach((track) => track.stop());
+  if (hostPeer) hostPeer.close();
   if (viewerPeer) viewerPeer.close();
+  if (viewerSocket) viewerSocket.disconnect();
+
   localStream = null;
-  peer = null;
+  hostPeer = null;
   viewerPeer = null;
+  viewerSocket = null;
+  controlAllowed = false;
+
   $("localVideo").srcObject = null;
   $("remoteVideo").srcObject = null;
   $("allowControl").checked = false;
+  $("controlBadge").textContent = "Contrôle désactivé";
+  $("controlBadge").className = "badge off";
+  $("stageHint").textContent = "Aucune connexion active";
   window.remoteAssist.setControlEnabled(false);
-  setStatus("Session arrêtée");
+  setStatus("Prêt");
 }
 
 $("stopSession").onclick = stopAll;
