@@ -7,7 +7,8 @@ const { Server } = require("socket.io");
 
 const SESSION_TTL = 10 * 60 * 1000;
 const MAX_CHAT = 2000;
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = Number(process.env.MAX_FILE_MB || 25) * 1024 * 1024;
+const PUBLIC_ORIGIN = process.env.PUBLIC_ORIGIN || "*";
 
 function randomDigits(length) {
   let value = "";
@@ -30,13 +31,20 @@ async function startEmbeddedServer() {
   const app = express();
   const server = http.createServer(app);
   const io = new Server(server, {
-    cors: { origin: "*" },
+    cors: { origin: PUBLIC_ORIGIN === "*" ? true : PUBLIC_ORIGIN.split(",").map((v) => v.trim()) },
     maxHttpBufferSize: MAX_FILE_BYTES + 1024 * 1024,
     pingInterval: 10000,
     pingTimeout: 15000
   });
   const sessions = new Map();
 
+  app.disable("x-powered-by");
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Permissions-Policy", "camera=(), geolocation=(), microphone=()");
+    next();
+  });
   app.use(express.json({ limit: "128kb" }));
   app.use(express.static(path.join(__dirname, "public")));
   app.get("/v5-modules.json", (_req, res) => {
@@ -152,10 +160,10 @@ async function startEmbeddedServer() {
       at: Date.now()
     }));
 
-    socket.on("clipboard-share", ({ text } = {}) => {
+    socket.on("clipboard-share", ({ text, image } = {}) => {
       const entry = getSessionForSocket(socket.id);
       if (!entry || !entry[1].permissions.clipboard) return;
-      relayToPeer(socket, "clipboard-share", { text: safeText(text, 100000) });
+      relayToPeer(socket, "clipboard-share", { text: safeText(text, 100000), image: typeof image === "string" && image.startsWith("data:image/") && image.length <= 5_000_000 ? image : null });
     });
 
     socket.on("file-offer", (payload = {}) => {
@@ -205,7 +213,9 @@ async function startEmbeddedServer() {
   }, 30000);
   server.on("close", () => clearInterval(cleanup));
 
-  await new Promise((resolve) => server.listen(0, "0.0.0.0", resolve));
+  const requestedPort = Number(process.env.PORT || 0);
+  const requestedHost = process.env.HOST || "0.0.0.0";
+  await new Promise((resolve) => server.listen(requestedPort, requestedHost, resolve));
   return { server, port: server.address().port };
 }
 

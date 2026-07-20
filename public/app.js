@@ -1,6 +1,10 @@
 const $ = (id) => document.getElementById(id);
 const Perf = window.RAPerf;
-const host = io();
+const SIGNALING_KEY = "madrador-signaling-url";
+const defaultSignalingUrl = window.location.origin;
+let signalingUrl = localStorage.getItem(SIGNALING_KEY) || defaultSignalingUrl;
+const socketOptions = { transports: ["websocket", "polling"], reconnection: true, reconnectionAttempts: 10, timeout: 12000 };
+let host = io(signalingUrl, socketOptions);
 
 let viewer = null;
 let code = null;
@@ -15,6 +19,22 @@ let outgoingFile = null;
 let deviceName = "PC";
 let clipboardPayload = { text: "", image: null };
 let permissions = { control:false, clipboard:false, files:false, audio:false };
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function setSocketStatus(socket) {
+  socket.on("connect", () => setStatus(`Serveur connecté • ${signalingUrl}`));
+  socket.on("connect_error", () => setStatus("Serveur de connexion inaccessible"));
+  socket.on("disconnect", (reason) => setStatus(`Serveur déconnecté • ${reason}`));
+}
+setSocketStatus(host);
 
 function setStatus(text) {
   $("status").textContent = text;
@@ -53,8 +73,8 @@ function renderHistory() {
   $("historyList").innerHTML = history.length
     ? history.map((item) => `
       <div class="history-item">
-        <b>${item.type}</b>
-        <div>${item.detail}</div>
+        <b>${escapeHtml(item.type)}</b>
+        <div>${escapeHtml(item.detail)}</div>
         <small>${new Date(item.at).toLocaleString()}</small>
       </div>`).join("")
     : "<p>Aucune connexion enregistrée.</p>";
@@ -62,8 +82,8 @@ function renderHistory() {
   $("recentCards").innerHTML = history.length
     ? history.slice(0, 6).map((item) => `
       <div class="recent-card">
-        <b>${item.type}</b>
-        <span>${item.detail}</span>
+        <b>${escapeHtml(item.type)}</b>
+        <span>${escapeHtml(item.detail)}</span>
         <small>${new Date(item.at).toLocaleString()}</small>
       </div>`).join("")
     : `<div class="recent-card"><b>Aucune connexion</b><small>Vos sessions apparaîtront ici.</small></div>`;
@@ -106,7 +126,7 @@ $("chooseScreen").onclick = async () => {
   for (const source of sources) {
     const button = document.createElement("button");
     button.className = "source";
-    button.innerHTML = `<img src="${source.thumbnail}" alt=""><b>${source.name}</b>`;
+    button.innerHTML = `<img src="${source.thumbnail}" alt=""><b>${escapeHtml(source.name)}</b>`;
     button.onclick = async () => {
       const profile = Perf.profiles[$("profile").value];
       stream?.getTracks().forEach((track) => track.stop());
@@ -238,7 +258,8 @@ $("connect").onclick = () => {
   }
 
   viewer?.disconnect();
-  viewer = io();
+  viewer = io(signalingUrl, socketOptions);
+  setSocketStatus(viewer);
   viewer.emit("viewer-request", { code: viewerCode, deviceName });
   setStatus("Demande envoyée");
 
@@ -286,7 +307,7 @@ function addMessage(text, mine) {
 function bindRelay(socket) {
   socket.on("chat-message", ({ text }) => addMessage(text, false));
 
-  socket.on("clipboard-share", async (payload) => {
+  socket.on("clipboard-share", async (payload = {}) => {
     if (!permissions.clipboard) return;
     await window.remoteAssist.clipboardWrite(payload);
     addMessage(payload.image ? "Image copiée reçue dans le presse-papiers." : "Texte copié reçu.", false);
@@ -549,6 +570,28 @@ $("clearHistory").onclick = () => {
   renderHistory();
 };
 
+
+// Serveur de signalisation partagé (nécessaire entre deux PC différents)
+const signalingInput = $("signalingUrl");
+if (signalingInput) signalingInput.value = signalingUrl;
+$("saveSignaling")?.addEventListener("click", () => {
+  const value = signalingInput.value.trim().replace(/\/$/, "");
+  try {
+    const parsed = new URL(value);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Protocole invalide");
+    localStorage.setItem(SIGNALING_KEY, parsed.origin);
+    signalingUrl = parsed.origin;
+    $("signalingStatus").textContent = "Adresse enregistrée. Redémarre l’application sur les deux PC.";
+  } catch {
+    $("signalingStatus").textContent = "Adresse invalide. Exemple : https://serveur.example.com";
+  }
+});
+$("resetSignaling")?.addEventListener("click", () => {
+  localStorage.removeItem(SIGNALING_KEY);
+  signalingUrl = defaultSignalingUrl;
+  signalingInput.value = signalingUrl;
+  $("signalingStatus").textContent = "Serveur local restauré.";
+});
 
 // Madrador Remote V5 modules
 let lastV5Stats = null;

@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.log
 .env
+.env.*
+!.env.example
+*.bak
+*.tmp
+public/app.backup*.js
+Thumbs.db
+.DS_Store

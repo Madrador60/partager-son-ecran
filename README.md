@@ -1,40 +1,36 @@
-# Madrador Remote V4
+# Madrador Remote V6
 
-Application d’assistance à distance visible et autorisée, avec identité Madrador.
+Application Windows d'assistance à distance visible et soumise à l'accord explicite du PC distant.
 
-## Nouveautés
+## Installation développeur
 
-- logo `image.png` intégré dans l’interface et l’installateur Windows ;
-- fenêtre lancée automatiquement maximisée ;
-- interface sombre professionnelle inspirée des logiciels d’assistance modernes ;
-- barre de connexion rapide en haut ;
-- code temporaire à 9 chiffres ;
-- écran d’autorisation détaillé avant chaque connexion ;
-- permissions séparées pour clavier/souris, documents, presse-papiers et audio ;
-- transfert de documents par sélection ou glisser-déposer ;
-- demande d’acceptation avant la réception d’un document ;
-- presse-papiers texte et images ;
-- chat ;
-- historique local ;
-- multi-écran et sélection de fenêtre ;
-- statistiques réseau et vidéo ;
-- profils automatiques, 120 FPS cible, 1080p60, 1440p60 et 720p ;
-- installateur Windows avec icône Madrador.
+```bash
+npm install
+npm run verify
+npm start
+```
 
-## Installation
+## Connexion entre deux PC
 
-1. Décompresser le ZIP.
-2. Lancer `INSTALLER-MADRADOR-V4.bat`.
-3. Lancer `LANCER-EN-TEST.bat`.
-4. Pour produire le Setup Windows, lancer `INSTALLER-ET-CREER-EXE.bat`.
+Les deux applications doivent utiliser le même serveur de signalisation. Dans **Paramètres > Serveur de connexion**, saisissez la même URL HTTPS sur les deux ordinateurs. Le serveur peut être lancé séparément avec :
+
+```bash
+PORT=3000 npm run server
+```
+
+Pour une connexion Internet fiable derrière certains routeurs, ajoutez aussi un serveur TURN dans la configuration WebRTC. Le STUN public seul ne garantit pas toutes les connexions.
+
+## Créer et publier Windows
+
+Sous Windows, lancez `PUBLICATION-TOTALE.bat`. Le script vérifie le code, crée l'installateur, publie le dépôt, puis tente de publier l'EXE dans une Release. Un échec de Release n'annule plus le build ni le push Git.
+
+GitHub Actions reconstruit aussi automatiquement l'installateur à chaque push sur `main`.
 
 ## Sécurité
 
-La connexion distante nécessite toujours une acceptation visible. Les permissions sont
-affichées séparément et peuvent être refusées. Aucun accès caché ou silencieux n’est inclus.
-
-## Limites
-
-La connexion par Internet hors réseau local exige encore un serveur public de signalisation
-et un serveur TURN. Le 120 FPS est un objectif WebRTC et dépend du GPU, du réseau et de
-l’écran ; il n’est pas garanti comme avec un moteur natif Direct3D/NVENC.
+- validation manuelle obligatoire avant chaque session ;
+- permissions séparées pour contrôle, presse-papiers, fichiers et audio ;
+- contrôle désactivé par défaut ;
+- contexte Electron isolé et Node désactivé dans la page ;
+- codes temporaires et expiration automatique ;
+- aucune fonction furtive ou connexion silencieuse.

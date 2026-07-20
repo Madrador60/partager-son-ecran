@@ -1,7 +1,7 @@
 {
   "name": "madrador-remote",
-  "version": "5.0.0",
-  "description": "Madrador Remote V5 - architecture modulaire 18 fonctions",
+  "version": "6.0.0",
+  "description": "Madrador Remote V6 - assistance distante visible, consentie et modulaire",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -12,7 +12,10 @@
     "check": "node --check main.js && node --check preload.js && node --check signaling-server.js && node --check public/app.js && node --check public/performance.js",
     "update-safe": "npm audit fix",
     "v5:check": "node scripts/v5-check.js",
-    "v5:report": "node scripts/v5-report.js"
+    "v5:report": "node scripts/v5-report.js",
+    "verify": "npm run check && npm run v5:check && npm run test:security",
+    "test:security": "node scripts/security-check.js",
+    "publish:all": "PUBLICATION-TOTALE.bat"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
@@ -47,6 +50,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Madrador Remote"
-    }
-  }
+    },
+    "artifactName": "Madrador-Remote-Setup-${version}.${ext}"
+  },
+  "author": "Madrador60"
 }

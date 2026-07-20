@@ -197,6 +197,17 @@
         </div>
 
         <div class="page-card">
+          <h2>Serveur de connexion</h2>
+          <p>Pour connecter deux PC sur Internet, les deux applications doivent utiliser la même adresse de signalisation.</p>
+          <input id="signalingUrl" type="url" placeholder="https://votre-serveur.example.com" autocomplete="off">
+          <div class="button-row">
+            <button id="saveSignaling" class="primary-btn">Enregistrer</button>
+            <button id="resetSignaling" class="secondary-btn">Serveur local</button>
+          </div>
+          <div id="signalingStatus" class="feedback"></div>
+        </div>
+
+        <div class="page-card">
           <h2>Presse-papiers partagé</h2>
           <textarea id="clipboardText" placeholder="Le texte copié apparaîtra ici…"></textarea>
           <div id="clipboardPreview" class="clipboard-preview">Aucune image copiée</div>
