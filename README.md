@@ -1,38 +1,40 @@
-# RemoteAssist Ultimate V3
+# Madrador Remote V4
 
-Application d’assistance à distance visible avec consentement explicite.
+Application d’assistance à distance visible et autorisée, avec identité Madrador.
 
-## Fonctions intégrées
+## Nouveautés
 
+- logo `image.png` intégré dans l’interface et l’installateur Windows ;
+- fenêtre lancée automatiquement maximisée ;
+- interface sombre professionnelle inspirée des logiciels d’assistance modernes ;
+- barre de connexion rapide en haut ;
 - code temporaire à 9 chiffres ;
-- demande d’autorisation visible ;
-- partage d’écran ou de fenêtre ;
-- contrôle clavier/souris facultatif ;
-- profils 720p60, 1080p60, 1080p120 cible et 1440p60 ;
-- adaptation automatique au réseau ;
-- statistiques FPS, ping, débit, pertes, codec et résolution ;
+- écran d’autorisation détaillé avant chaque connexion ;
+- permissions séparées pour clavier/souris, documents, presse-papiers et audio ;
+- transfert de documents par sélection ou glisser-déposer ;
+- demande d’acceptation avant la réception d’un document ;
+- presse-papiers texte et images ;
 - chat ;
-- presse-papiers autorisé séparément ;
-- transfert de fichiers avec proposition et acceptation, limité à 25 Mo ;
-- plusieurs écrans via le sélecteur de sources ;
-- capture audio facultative selon la prise en charge Windows/Electron ;
 - historique local ;
-- expiration du code ;
-- sauvegarde de l’ancien app.js pendant l’installation.
+- multi-écran et sélection de fenêtre ;
+- statistiques réseau et vidéo ;
+- profils automatiques, 120 FPS cible, 1080p60, 1440p60 et 720p ;
+- installateur Windows avec icône Madrador.
 
 ## Installation
 
-1. Installer Node.js.
-2. Lancer `INSTALLER-MISE-A-JOUR-TOTALE.bat`.
+1. Décompresser le ZIP.
+2. Lancer `INSTALLER-MADRADOR-V4.bat`.
 3. Lancer `LANCER-EN-TEST.bat`.
-4. Pour créer l’installateur Windows : `INSTALLER-ET-CREER-EXE.bat`.
+4. Pour produire le Setup Windows, lancer `INSTALLER-ET-CREER-EXE.bat`.
 
-## Limites honnêtes
+## Sécurité
 
-Cette version est une application Electron/WebRTC complète, mais ce n’est pas encore
-un moteur natif équivalent à AnyDesk. Le vrai 120 FPS constant et la latence minimale
-nécessitent un module Windows natif Direct3D avec NVENC, AMF ou Quick Sync, ainsi
-qu’un serveur public de signalisation et TURN pour les connexions Internet hors LAN.
+La connexion distante nécessite toujours une acceptation visible. Les permissions sont
+affichées séparément et peuvent être refusées. Aucun accès caché ou silencieux n’est inclus.
 
-Aucun accès caché, aucune connexion silencieuse et aucun contournement des autorisations
-Windows ne sont inclus.
+## Limites
+
+La connexion par Internet hors réseau local exige encore un serveur public de signalisation
+et un serveur TURN. Le 120 FPS est un objectif WebRTC et dépend du GPU, du réseau et de
+l’écran ; il n’est pas garanti comme avec un moteur natif Direct3D/NVENC.

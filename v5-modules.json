@@ -1,0 +1,110 @@
+[
+  {
+    "id": 1,
+    "name": "Design premium",
+    "status": "implemented",
+    "detail": "Interface sombre moderne, animations, cartes, thème préparé."
+  },
+  {
+    "id": 2,
+    "name": "Tableau de bord",
+    "status": "implemented",
+    "detail": "Nom du PC, ID, statut, historique et indicateurs."
+  },
+  {
+    "id": 3,
+    "name": "Lecteur distant",
+    "status": "implemented",
+    "detail": "Lecteur plein écran, barre de session et outils."
+  },
+  {
+    "id": 4,
+    "name": "Overlay direct",
+    "status": "implemented",
+    "detail": "FPS, ping, débit, pertes, codec, résolution."
+  },
+  {
+    "id": 5,
+    "name": "Gestionnaire de fichiers",
+    "status": "partial",
+    "detail": "Transfert accepté/refusé et glisser-déposer. Explorateur distant complet préparé."
+  },
+  {
+    "id": 6,
+    "name": "Presse-papiers avancé",
+    "status": "implemented",
+    "detail": "Texte et images avec permission séparée."
+  },
+  {
+    "id": 7,
+    "name": "Chat moderne",
+    "status": "implemented",
+    "detail": "Messages temps réel, interface moderne."
+  },
+  {
+    "id": 8,
+    "name": "Permissions détaillées",
+    "status": "implemented",
+    "detail": "Contrôle, presse-papiers, fichiers, audio séparés."
+  },
+  {
+    "id": 9,
+    "name": "Multi-écran",
+    "status": "implemented",
+    "detail": "Sélecteur écran/fenêtre. Changement instantané préparé."
+  },
+  {
+    "id": 10,
+    "name": "Enregistrement",
+    "status": "prepared",
+    "detail": "Architecture MediaRecorder préparée, export MP4 dépend des codecs."
+  },
+  {
+    "id": 11,
+    "name": "Notifications",
+    "status": "implemented",
+    "detail": "Notifications internes et dialogues visibles."
+  },
+  {
+    "id": 12,
+    "name": "Compte Madrador",
+    "status": "prepared",
+    "detail": "Module d'authentification préparé, backend cloud non fourni."
+  },
+  {
+    "id": 13,
+    "name": "Mises à jour automatiques",
+    "status": "prepared",
+    "detail": "Structure updater et manifeste préparés. Signature nécessaire en production."
+  },
+  {
+    "id": 14,
+    "name": "Assistant IA",
+    "status": "partial",
+    "detail": "Diagnostic automatique local selon ping/pertes/FPS."
+  },
+  {
+    "id": 15,
+    "name": "Style Windows 11",
+    "status": "implemented",
+    "detail": "Fenêtre maximisée, animations, interface moderne."
+  },
+  {
+    "id": 16,
+    "name": "Mode Gaming",
+    "status": "partial",
+    "detail": "Profils faible latence et 120 FPS cible. Moteur natif requis pour garantie."
+  },
+  {
+    "id": 17,
+    "name": "Applications mobiles",
+    "status": "prepared",
+    "detail": "Spécification Android/iOS préparée, applications non compilées."
+  },
+  {
+    "id": 18,
+    "name": "Architecture V5",
+    "status": "implemented",
+    "detail": "Découpage apps/packages/native/server/docs/scripts."
+  }
+]

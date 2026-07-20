@@ -1,7 +1,7 @@
 {
-  "name": "remoteassist-complete",
-  "version": "3.0.0",
-  "description": "Assistance à distance visible avec consentement, chat, fichiers, presse-papiers, audio et diagnostics",
+  "name": "madrador-remote",
+  "version": "5.0.0",
+  "description": "Madrador Remote V5 - architecture modulaire 18 fonctions",
   "main": "main.js",
   "private": true,
   "scripts": {
@@ -10,7 +10,9 @@
     "build": "electron-builder --win nsis",
     "dist": "npm run build",
     "check": "node --check main.js && node --check preload.js && node --check signaling-server.js && node --check public/app.js && node --check public/performance.js",
-    "update-safe": "npm audit fix"
+    "update-safe": "npm audit fix",
+    "v5:check": "node scripts/v5-check.js",
+    "v5:report": "node scripts/v5-report.js"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
@@ -23,8 +25,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "fr.madrador.remoteassist",
-    "productName": "RemoteAssist Ultimate",
+    "appId": "com.madrador.remote",
+    "productName": "Madrador Remote",
     "asar": true,
     "files": [
       "main.js",
@@ -35,13 +37,16 @@
       "node_modules/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "artifactName": "Madrador-Remote-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "Madrador Remote"
     }
   }
 }

@@ -39,6 +39,9 @@ async function startEmbeddedServer() {
 
   app.use(express.json({ limit: "128kb" }));
   app.use(express.static(path.join(__dirname, "public")));
+  app.get("/v5-modules.json", (_req, res) => {
+    res.sendFile(path.join(__dirname, "v5-modules.json"));
+  });
 
   app.get("/api/health", (_req, res) => res.json({ ok: true, sessions: sessions.size }));
   app.get("/api/local-info", (_req, res) => {
