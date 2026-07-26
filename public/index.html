@@ -3,315 +3,92 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http: https: ws: wss:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
   <title>Madrador Remote</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="app-shell">
-  <header class="topbar">
-    <div class="brand">
-      <img src="assets/logo.png" alt="Madrador" class="brand-logo">
-      <div>
-        <h1>Madrador Remote</h1>
-        <p id="deviceInfo">Chargement du poste…</p>
-      </div>
-    </div>
-
-    <div class="remote-connect">
-      <span class="online-dot"></span>
-      <input id="remoteCode" maxlength="11" inputmode="numeric" placeholder="Entrez le code distant">
-      <button id="connect" class="connect-arrow" title="Se connecter">➜</button>
-    </div>
-
-    <div id="status" class="top-status">Prêt</div>
-  </header>
-
-  <div class="security-banner">
-    Toutes les connexions demandent une autorisation visible sur le PC distant.
-  </div>
-
-  <main>
-    <section id="home" class="view active">
-      <div class="identity-row">
-        <span>Ce poste de travail</span>
-        <strong id="hostCode">— — — — — — — — —</strong>
-        <button id="createCode" class="invite-btn">Créer / renouveler</button>
-      </div>
-
-      <nav class="section-tabs">
-        <button class="tab active" data-view="home">Accueil</button>
-        <button class="tab" data-view="session">Session</button>
-        <button class="tab" data-view="files">Documents</button>
-        <button class="tab" data-view="chat">Discussion</button>
-        <button class="tab" data-view="history">Dernières connexions</button>
-        <button class="tab" data-view="settings">Paramètres</button><button class="tab" data-view="v5hub">Centre V5</button>
+  <div class="shell">
+    <aside>
+      <div class="brand"><img src="assets/logo.png" alt=""><span>Madrador</span></div>
+      <nav>
+        <button class="nav active" data-panel="home">⌂ <span>Accueil</span></button>
+        <button class="nav" data-panel="session">▣ <span>Session</span></button>
+        <button class="nav" data-panel="transfer">⇅ <span>Échanges</span></button>
+        <button class="nav" data-panel="settings">⚙ <span>Réglages</span></button>
       </nav>
+      <div class="connection"><i id="onlineDot"></i><span id="connectionLabel">Connexion…</span></div>
+    </aside>
 
-      <div class="dashboard-grid">
-        <article class="feature-card accent-blue">
-          <div class="feature-icon">🖥️</div>
-          <h2>Partager ce poste</h2>
-          <p>Sélectionnez l’écran ou la fenêtre qui sera visible après votre accord.</p>
-          <button id="chooseScreen" class="card-action">Choisir l’écran</button>
-          <div id="selectedSource" class="mini-status">Aucune source sélectionnée</div>
-        </article>
+    <main>
+      <header>
+        <div><h1 id="pageTitle">Bonjour</h1><p id="deviceLabel">Préparation de votre poste…</p></div>
+        <div id="status" class="status">Prêt</div>
+      </header>
 
-        <article class="feature-card accent-purple">
-          <div class="feature-icon">🔐</div>
-          <h2>Permissions de session</h2>
-          <p>Contrôle, documents, presse-papiers et audio sont autorisés séparément.</p>
-          <button class="card-action" data-view-jump="settings">Ouvrir les permissions</button>
-          <div class="mini-status">Aucun accès silencieux</div>
-        </article>
-
-        <article class="feature-card accent-orange">
-          <div class="feature-icon">📁</div>
-          <h2>Transférer des documents</h2>
-          <p>Envoyez un document avec une demande d’acceptation chez le destinataire.</p>
-          <button class="card-action" data-view-jump="files">Choisir un document</button>
-          <div class="mini-status">Taille maximale : 25 Mo</div>
-        </article>
-
-        <article class="feature-card accent-green">
-          <div class="feature-icon">📋</div>
-          <h2>Copier-coller partagé</h2>
-          <p>Le texte et les images du presse-papiers peuvent être partagés avec permission.</p>
-          <button class="card-action" data-view-jump="settings">Ouvrir le presse-papiers</button>
-          <div class="mini-status">Texte + images</div>
-        </article>
-      </div>
-
-      <section class="recent-panel">
-        <div class="panel-heading">
-          <h2>Dernières connexions</h2>
-          <button class="link-btn" data-view-jump="history">Tout afficher</button>
+      <section id="home" class="panel active">
+        <div class="hero">
+          <div><span class="eyebrow">Assistance à distance</span><h2>Un accès simple.<br><em>Toujours autorisé.</em></h2><p>Partagez votre écran ou aidez un autre ordinateur avec un code temporaire.</p></div>
+          <div class="shield">✓<small>Connexion<br>consentie</small></div>
         </div>
-        <div id="recentCards" class="recent-grid"></div>
+        <div class="cards">
+          <article>
+            <span class="card-icon blue">↗</span>
+            <h3>Partager ce PC</h3>
+            <p>Choisissez l’écran visible, créez un code puis acceptez la demande.</p>
+            <button id="chooseSource" class="secondary">Choisir un écran</button>
+            <button id="createSession" class="primary">Créer un code</button>
+            <strong id="localCode" class="code">— — — — — — — — —</strong>
+            <small id="sourceLabel">Aucun écran sélectionné</small>
+          </article>
+          <article>
+            <span class="card-icon violet">⌁</span>
+            <h3>Contrôler un PC</h3>
+            <p>Entrez le code affiché sur l’ordinateur de la personne à aider.</p>
+            <label for="remoteCode">Code distant</label>
+            <input id="remoteCode" maxlength="11" inputmode="numeric" placeholder="000 000 000">
+            <button id="connect" class="primary">Demander la connexion</button>
+          </article>
+        </div>
       </section>
-    </section>
 
-    <section id="session" class="view">
-      <nav class="section-tabs">
-        <button class="tab" data-view="home">Accueil</button>
-        <button class="tab active" data-view="session">Session</button>
-        <button class="tab" data-view="files">Documents</button>
-        <button class="tab" data-view="chat">Discussion</button>
-        <button class="tab" data-view="settings">Paramètres</button>
-      </nav>
-
-      <div class="session-toolbar">
-        <select id="profile">
-          <option value="auto">Qualité automatique</option>
-          <option value="ultra">Ultra fluide — jusqu’à 120 FPS</option>
-          <option value="balanced">1080p — 60 FPS</option>
-          <option value="quality">1440p — 60 FPS</option>
-          <option value="low">Connexion faible — 720p</option>
-        </select>
-        <button id="fullscreen" class="toolbar-btn">⛶ Plein écran</button>
-        <button id="stop" class="toolbar-btn danger-btn">■ Arrêter</button>
-      </div>
-
-      <div class="stats-strip">
-        <div><span>FPS envoyés</span><b id="sent">0</b></div>
-        <div><span>FPS reçus</span><b id="recv">0</b></div>
-        <div><span>Ping</span><b id="ping">0 ms</b></div>
-        <div><span>Débit</span><b id="rate">0 Mb/s</b></div>
-        <div><span>Pertes</span><b id="loss">0 %</b></div>
-        <div><span>Codec</span><b id="codec">—</b></div>
-        <div><span>Résolution</span><b id="resolution">—</b></div>
-      </div>
-
-      <div class="remote-stage">
-        <video id="remoteVideo" autoplay playsinline tabindex="0"></video>
-        <video id="localVideo" autoplay muted playsinline></video>
-      </div>
-    </section>
-
-    <section id="files" class="view">
-      <nav class="section-tabs">
-        <button class="tab" data-view="home">Accueil</button>
-        <button class="tab active" data-view="files">Documents</button>
-        <button class="tab" data-view="chat">Discussion</button>
-        <button class="tab" data-view="settings">Paramètres</button>
-      </nav>
-      <div class="page-card">
-        <h2>Transfert de documents</h2>
-        <p>Le destinataire voit le nom et la taille du fichier et doit cliquer sur Accepter.</p>
-        <div class="drop-zone" id="dropZone">
-          <div class="drop-icon">⇩</div>
-          <strong>Glissez un document ici</strong>
-          <span>ou sélectionnez-le manuellement</span>
-          <input id="fileInput" type="file">
+      <section id="session" class="panel">
+        <div class="toolbar">
+          <b>Session distante</b>
+          <span id="sessionState">Aucune session</span>
+          <button id="fullscreen" class="secondary">Plein écran</button>
+          <button id="stop" class="danger">Arrêter</button>
         </div>
-        <button id="sendFile" class="primary-btn">Proposer le document</button>
-        <div id="fileStatus" class="feedback"></div>
-      </div>
-    </section>
+        <div class="screen"><video id="remoteVideo" autoplay playsinline tabindex="0"></video><video id="localVideo" autoplay muted playsinline></video><div id="screenEmpty">L’écran distant apparaîtra ici</div></div>
+        <div class="metrics"><span>Débit <b id="bitrate">0 Mb/s</b></span><span>Latence <b id="latency">0 ms</b></span><span>Résolution <b id="resolution">—</b></span></div>
+      </section>
 
-    <section id="chat" class="view">
-      <nav class="section-tabs">
-        <button class="tab" data-view="home">Accueil</button>
-        <button class="tab" data-view="files">Documents</button>
-        <button class="tab active" data-view="chat">Discussion</button>
-        <button class="tab" data-view="settings">Paramètres</button>
-      </nav>
-      <div class="chat-panel">
-        <div id="messages" class="messages"></div>
-        <div class="chat-compose">
-          <input id="chatInput" placeholder="Écrivez un message…">
-          <button id="sendChat" class="primary-btn">Envoyer</button>
+      <section id="transfer" class="panel">
+        <div class="split">
+          <article><h3>Discussion</h3><div id="messages" class="messages"></div><div class="compose"><input id="messageInput" placeholder="Votre message"><button id="sendMessage" class="primary">Envoyer</button></div></article>
+          <article><h3>Documents</h3><p>Chaque fichier est confirmé par le destinataire.</p><input id="fileInput" type="file"><button id="sendFile" class="primary">Proposer le fichier</button><div id="fileStatus" class="note">Aucun fichier sélectionné</div></article>
+          <article><h3>Presse-papiers</h3><p>Partagez uniquement le texte que vous avez choisi.</p><textarea id="clipboardText" placeholder="Texte à partager"></textarea><button id="readClipboard" class="secondary">Lire le presse-papiers</button><button id="sendClipboard" class="primary">Partager le texte</button></article>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="history" class="view">
-      <nav class="section-tabs">
-        <button class="tab" data-view="home">Accueil</button>
-        <button class="tab active" data-view="history">Dernières connexions</button>
-        <button class="tab" data-view="settings">Paramètres</button>
-      </nav>
-      <div class="page-card">
-        <div class="panel-heading">
-          <h2>Historique local</h2>
-          <button id="clearHistory" class="danger-outline">Effacer l’historique</button>
+      <section id="settings" class="panel">
+        <div class="split">
+          <article><h3>Permissions accordées</h3>
+            <label class="toggle"><span>Clavier et souris<small>Autoriser le contrôle de ce PC</small></span><input id="allowControl" type="checkbox"></label>
+            <label class="toggle"><span>Presse-papiers<small>Partager du texte</small></span><input id="allowClipboard" type="checkbox"></label>
+            <label class="toggle"><span>Documents<small>Autoriser les propositions de fichiers</small></span><input id="allowFiles" type="checkbox"></label>
+            <button id="applyPermissions" class="primary">Appliquer</button>
+          </article>
+          <article><h3>Serveur</h3><label for="serverUrl">Adresse de connexion</label><input id="serverUrl" type="url" placeholder="https://remote.example.com"><p class="note">Les deux ordinateurs doivent utiliser la même adresse.</p><button id="saveServer" class="primary">Enregistrer et redémarrer</button></article>
         </div>
-        <div id="historyList" class="history-list"></div>
-      </div>
-    </section>
-
-    <section id="settings" class="view">
-      <nav class="section-tabs">
-        <button class="tab" data-view="home">Accueil</button>
-        <button class="tab" data-view="session">Session</button>
-        <button class="tab active" data-view="settings">Paramètres</button>
-      </nav>
-
-      <div class="settings-grid">
-        <div class="page-card">
-          <h2>Permissions actives</h2>
-          <label class="permission-line"><span><b>Contrôle clavier et souris</b><small>Permet d’utiliser ce PC pendant la session.</small></span><input id="permControl" type="checkbox"></label>
-          <label class="permission-line"><span><b>Presse-papiers partagé</b><small>Autorise le texte et les images copiées.</small></span><input id="permClipboard" type="checkbox"></label>
-          <label class="permission-line"><span><b>Transfert de documents</b><small>Chaque document reste soumis à acceptation.</small></span><input id="permFiles" type="checkbox"></label>
-          <label class="permission-line"><span><b>Audio du système</b><small>Dépend de la compatibilité Windows.</small></span><input id="permAudio" type="checkbox"></label>
-          <button id="applyPermissions" class="primary-btn">Appliquer à la session</button>
-        </div>
-
-        <div class="page-card">
-          <h2>Serveur de connexion</h2>
-          <p>Pour connecter deux PC sur Internet, les deux applications doivent utiliser la même adresse de signalisation.</p>
-          <input id="signalingUrl" type="url" placeholder="https://votre-serveur.example.com" autocomplete="off">
-          <div class="button-row">
-            <button id="saveSignaling" class="primary-btn">Enregistrer</button>
-            <button id="resetSignaling" class="secondary-btn">Serveur local</button>
-          </div>
-          <div id="signalingStatus" class="feedback"></div>
-        </div>
-
-        <div class="page-card">
-          <h2>Presse-papiers partagé</h2>
-          <textarea id="clipboardText" placeholder="Le texte copié apparaîtra ici…"></textarea>
-          <div id="clipboardPreview" class="clipboard-preview">Aucune image copiée</div>
-          <div class="button-row">
-            <button id="readClipboard" class="secondary-btn">Lire mon presse-papiers</button>
-            <button id="shareClipboard" class="primary-btn">Partager</button>
-          </div>
-          <div id="clipboardStatus" class="feedback"></div>
-        </div>
-      </div>
-    </section>
-  
-<section id="v5hub" class="view">
-  <nav class="section-tabs">
-    <button class="tab" data-view="home">Accueil</button>
-    <button class="tab active" data-view="v5hub">Centre V5</button>
-    <button class="tab" data-view="session">Session</button>
-    <button class="tab" data-view="settings">Paramètres</button>
-  </nav>
-
-  <div class="v5-grid">
-    <div class="page-card">
-      <h2>Diagnostic intelligent</h2>
-      <p id="aiDiagnostic">En attente d’une session active.</p>
-      <button id="runDiagnostic" class="primary-btn">Analyser la connexion</button>
-    </div>
-
-    <div class="page-card">
-      <h2>Enregistrement de session</h2>
-      <p>Enregistre uniquement le flux distant visible. Un indicateur REC reste affiché.</p>
-      <div class="button-row">
-        <button id="startRecording" class="primary-btn">● Démarrer REC</button>
-        <button id="stopRecording" class="danger-outline">■ Arrêter et exporter</button>
-      </div>
-      <div id="recordingStatus" class="feedback">Aucun enregistrement actif.</div>
-    </div>
-
-    <div class="page-card">
-      <h2>Thème</h2>
-      <div class="button-row">
-        <button id="themeDark" class="secondary-btn">Sombre</button>
-        <button id="themeLight" class="secondary-btn">Clair</button>
-      </div>
-    </div>
-
-    <div class="page-card">
-      <h2>Mode Gaming</h2>
-      <p>Priorité aux FPS et à la faible latence. La qualité est réduite avant les FPS.</p>
-      <button id="enableGaming" class="primary-btn">Activer le profil Gaming</button>
-    </div>
+      </section>
+    </main>
   </div>
 
-  <div class="page-card">
-    <h2>État des 18 modules</h2>
-    <div id="moduleMatrix" class="module-matrix"></div>
-  </div>
-</section>
+  <dialog id="sourceDialog"><form method="dialog"><header><h3>Choisir ce qui sera visible</h3><button value="cancel">×</button></header><div id="sourceGrid" class="source-grid"></div></form></dialog>
+  <dialog id="requestDialog"><div class="request"><span class="card-icon violet">⌁</span><h3>Demande de connexion</h3><p id="requester">Un ordinateur souhaite se connecter.</p><div class="dialog-actions"><button id="deny" class="secondary">Refuser</button><button id="accept" class="primary">Accepter</button></div></div></dialog>
 
-</main>
-</div>
-
-<div id="picker" class="modal hidden">
-  <div class="modal-card modal-wide">
-    <div class="modal-title"><h2>Choisir l’écran ou la fenêtre</h2><button id="closePicker">×</button></div>
-    <div id="sourceGrid" class="source-grid"></div>
-  </div>
-</div>
-
-<div id="incoming" class="modal hidden">
-  <div class="modal-card permission-dialog">
-    <img src="assets/logo.png" class="dialog-logo" alt="">
-    <span class="dialog-kicker">DEMANDE DE CONNEXION</span>
-    <h2 id="requester">Un ordinateur veut se connecter</h2>
-    <p>Choisissez exactement ce que vous autorisez. Vous pourrez arrêter la session à tout moment.</p>
-
-    <label class="permission-line"><span><b>Voir l’écran partagé</b><small>Nécessaire pour la connexion.</small></span><input type="checkbox" checked disabled></label>
-    <label class="permission-line"><span><b>Contrôler clavier et souris</b></span><input id="acceptControl" type="checkbox"></label>
-    <label class="permission-line"><span><b>Partager le presse-papiers</b></span><input id="acceptClipboard" type="checkbox"></label>
-    <label class="permission-line"><span><b>Envoyer et recevoir des documents</b></span><input id="acceptFiles" type="checkbox"></label>
-    <label class="permission-line"><span><b>Transmettre l’audio</b></span><input id="acceptAudio" type="checkbox"></label>
-
-    <div class="dialog-warning">N’acceptez que si vous connaissez la personne qui demande l’accès.</div>
-    <div class="dialog-actions">
-      <button id="deny" class="danger-outline">Refuser</button>
-      <button id="accept" class="primary-btn">Accepter la connexion</button>
-    </div>
-  </div>
-</div>
-
-<div id="fileOffer" class="modal hidden">
-  <div class="modal-card">
-    <div class="file-modal-icon">📄</div>
-    <h2>Document proposé</h2>
-    <p id="fileOfferText"></p>
-    <div class="dialog-actions">
-      <button id="declineFile" class="danger-outline">Refuser</button>
-      <button id="acceptFile" class="primary-btn">Accepter et enregistrer</button>
-    </div>
-  </div>
-</div>
-
-<script src="/socket.io/socket.io.js"></script>
-<script src="performance.js"></script>
-<script src="v5-features.js"></script>
-<script src="app.js"></script>
+  <script src="vendor/socket.io.min.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -6,22 +6,27 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "server": "node signaling-server.js",
+    "server": "node server/index.js",
     "build": "electron-builder --win nsis",
     "dist": "npm run build",
-    "check": "node --check main.js && node --check preload.js && node --check signaling-server.js && node --check public/app.js && node --check public/performance.js",
+    "check": "node --check main.js && node --check preload.js && node --check server/index.js && node --check src/shared/validation.js && node --check src/services/github-releases.js && node --check public/app.js && node --check website/site.js && node --check website/remote.js",
     "update-safe": "npm audit fix",
-    "v5:check": "node scripts/v5-check.js",
-    "v5:report": "node scripts/v5-report.js",
-    "verify": "npm run check && npm run v5:check && npm run test:security",
+    "verify": "npm run check && npm test && npm run test:security",
     "test:security": "node scripts/security-check.js",
-    "publish:all": "PUBLICATION-TOTALE.bat"
+    "test": "node scripts/test.js",
+    "diagnose": "node scripts/diagnose.js",
+    "site": "LANCER-LE-SITE.bat"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
+    "dotenv": "^16.6.1",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.6.0",
+    "helmet": "^8.3.0",
     "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "electron": "^37.2.0",
@@ -34,11 +39,16 @@
     "files": [
       "main.js",
       "preload.js",
-      "signaling-server.js",
+      "src/shared/**/*",
       "public/**/*",
-      "package.json",
-      "node_modules/**/*"
+      "assets/**/*",
+      "package.json"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "Madrador60",
+      "repo": "partager-son-ecran"
+    },
     "win": {
       "target": "nsis",
       "icon": "assets/icon.ico",

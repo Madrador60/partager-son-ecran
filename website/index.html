@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Madrador Remote permet d'aider un proche ou un collègue à distance avec son autorisation.">
+  <title>Madrador Remote — Assistance à distance simple et consentie</title>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/" aria-label="Accueil Madrador Remote">
+      <img src="/logo.png" alt="">
+      <span>Madrador Remote</span>
+    </a>
+    <nav aria-label="Navigation principale">
+      <a href="#fonctionnement">Fonctionnement</a>
+      <a href="#securite">Sécurité</a>
+      <a href="/remote">Connexion web</a>
+      <a id="navDownload" class="nav-cta" href="/api/download/latest/windows">Télécharger</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow"><span></span> Assistance à distance pour Windows</div>
+        <h1>Aidez un écran distant, <em>en toute confiance.</em></h1>
+        <p class="lead">Partage d’écran, contrôle clavier-souris, discussion et transfert de fichiers. Chaque connexion reste visible et doit être acceptée.</p>
+        <div class="actions">
+          <a id="downloadButton" class="button primary" href="/api/download/latest/windows">Télécharger pour Windows</a>
+          <a class="button secondary" href="/remote">Se connecter depuis le web</a>
+        </div>
+        <p id="releaseInfo" class="fine-print">Recherche de la dernière version…</p>
+        <a id="releaseFallback" class="fine-print" href="https://github.com/Madrador60/partager-son-ecran/releases" hidden>Voir toutes les versions</a>
+      </div>
+      <div class="product-card" aria-label="Aperçu d'une connexion Madrador Remote">
+        <div class="window-bar"><i></i><i></i><i></i><span>Madrador Remote</span></div>
+        <div class="product-body">
+          <div class="status-pill">● Prêt à recevoir</div>
+          <p>Votre identifiant temporaire</p>
+          <strong class="code">472 819 305</strong>
+          <button type="button">Partager ce code</button>
+          <div class="trust-row"><span>🔒</span><p><b>Vous gardez le contrôle</b><br>La session peut être arrêtée à tout moment.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="proof" aria-label="Points forts">
+      <div><b>9 chiffres</b><span>Code temporaire</span></div>
+      <div><b>1 clic</b><span>Pour accepter</span></div>
+      <div><b>4 contrôles</b><span>Permissions séparées</span></div>
+      <div><b>0 compte</b><span>Pour commencer</span></div>
+    </section>
+
+    <section id="fonctionnement" class="section">
+      <div class="section-heading">
+        <span>Simple par conception</span>
+        <h2>Une assistance en trois étapes</h2>
+      </div>
+      <div class="steps">
+        <article><b>01</b><h3>Ouvrez l’application</h3><p>La personne aidée lance Madrador Remote et crée un code temporaire.</p></article>
+        <article><b>02</b><h3>Partagez le code</h3><p>L’assistant saisit les neuf chiffres depuis sa propre application.</p></article>
+        <article><b>03</b><h3>Acceptez la demande</h3><p>La personne aidée choisit précisément les autorisations accordées.</p></article>
+      </div>
+    </section>
+
+    <section id="securite" class="security">
+      <div>
+        <span class="section-label">La sécurité est visible</span>
+        <h2>Jamais d’accès silencieux.</h2>
+        <p>Une connexion ne commence qu’après une action claire sur le PC distant. Le contrôle, le presse-papiers, les fichiers et l’audio disposent chacun de leur propre permission.</p>
+      </div>
+      <ul>
+        <li><span>✓</span> Codes de session temporaires</li>
+        <li><span>✓</span> Autorisation locale obligatoire</li>
+        <li><span>✓</span> Arrêt immédiat depuis les deux postes</li>
+        <li><span>✓</span> Aucune conservation des écrans sur le serveur</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <a class="brand" href="/"><img src="/logo.png" alt=""><span>Madrador Remote</span></a>
+    <p>Une assistance distante claire, visible et consentie.</p>
+    <span>© <span id="year"></span> Madrador Remote</span>
+  </footer>
+  <script src="/site.js"></script>
+</body>
+</html>

@@ -1,36 +1,188 @@
-# Madrador Remote V6
+<p align="center"><img src="assets/logo.png" width="110" alt="Logo Madrador Remote"></p>
 
-Application Windows d'assistance à distance visible et soumise à l'accord explicite du PC distant.
+# Madrador Remote
 
-## Installation développeur
+[![Validation](https://github.com/Madrador60/partager-son-ecran/actions/workflows/ci.yml/badge.svg)](https://github.com/Madrador60/partager-son-ecran/actions/workflows/ci.yml)
+[![Dernière version](https://img.shields.io/github/v/release/Madrador60/partager-son-ecran)](https://github.com/Madrador60/partager-son-ecran/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-2161f5)](https://github.com/Madrador60/partager-son-ecran/releases/latest)
 
-```bash
+Application Windows d’assistance à distance visible et consentie. Madrador Remote permet de partager un écran, contrôler un poste autorisé, discuter et échanger des fichiers ou du texte.
+
+> **Projet en développement.** Madrador Remote est actuellement un MVP Windows. Il ne remplace pas encore un service commercial comme AnyDesk, ne garantit aucune latence nulle et ne doit jamais être utilisé sans consentement.
+
+## Télécharger
+
+Le bouton du site interroge l’API interne puis télécharge directement l’installateur `.exe` de la dernière release stable. La page [Releases](https://github.com/Madrador60/partager-son-ecran/releases) sert uniquement de secours, d’historique et de consultation des checksums. Sans release contenant un fichier `Madrador-Remote-Setup-*.exe`, le téléchargement direct ne peut pas fonctionner.
+
+## Utiliser Madrador Remote sans installer l’application
+
+L’application Windows reste obligatoire sur le PC hôte. Le viewer peut utiliser Chrome, Edge ou un navigateur WebRTC compatible :
+
+1. ouvrir l’application sur le PC distant ;
+2. choisir l’écran puis créer un code ;
+3. ouvrir `/remote` sur le site Madrador Remote ;
+4. saisir le code à neuf chiffres ;
+5. accepter la demande sur le PC distant ;
+6. utiliser la session dans le navigateur.
+
+| Fonction | Application Windows | Interface web |
+| --- | ---: | ---: |
+| Héberger une session | Oui | Non |
+| Se connecter à un PC | Oui | Oui |
+| Voir l’écran distant | Oui | Oui |
+| Contrôle souris | Basique | Basique, avec autorisation |
+| Contrôle clavier | Basique | Partiel selon le navigateur |
+| Transfert de fichiers | Limité | Limité, par DataChannel |
+| Presse-papiers texte | Oui | Limité par le navigateur |
+| Accès sans surveillance | Non | Non |
+| Service Windows | Non | Non |
+| Installation nécessaire | Oui | Non pour le viewer |
+
+Le navigateur ne peut pas devenir un agent Windows permanent et certains raccourcis clavier sont réservés par le système.
+
+## Fonctionnalités disponibles
+
+- code temporaire à neuf chiffres ;
+- approbation obligatoire sur le PC partagé ;
+- choix de l’écran ou de la fenêtre ;
+- contrôle clavier et souris révocable ;
+- prise en charge des écrans secondaires ;
+- discussion, presse-papiers texte et fichiers jusqu’à 25 Mo ;
+- permissions séparées pour chaque session ;
+- arrêt immédiat depuis les deux ordinateurs.
+
+## Expérimental ou planifié
+
+- reconnexion avancée et jetons de reprise ;
+- DataChannels spécialisés et transfert avec reprise ;
+- audio système ;
+- TURN temporaire et déploiement multi-instance ;
+- qualité adaptative et négociation avancée des codecs ;
+- multi-écrans avancé, appareils de confiance et accès sans surveillance.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  H["PC hôte · Electron"] <-->|"Signalisation Socket.IO"| S["Serveur"]
+  V["PC viewer · Electron"] <-->|"Signalisation Socket.IO"| S
+  H <-->|"Flux écran WebRTC chiffré"| V
+  H -.-> N["STUN / TURN"]
+  V -.-> N
+```
+
+Consultez [ARCHITECTURE.md](ARCHITECTURE.md) et [AUDIT.md](AUDIT.md) pour l’état technique réel.
+
+## Structure du dépôt
+
+| Dossier | Rôle |
+| --- | --- |
+| `public/` | Interface de l’application Electron |
+| `server/` | Serveur de signalisation Socket.IO |
+| `website/` | Site public de présentation |
+| `scripts/` | Tests, sécurité et diagnostic |
+
+## Lancer le site localement
+
+Sous Windows, double-cliquez sur `LANCER-LE-SITE.bat`. Le script installe les dépendances si nécessaire, ouvre `http://127.0.0.1:3000` et garde le serveur actif jusqu’à la fermeture de la fenêtre.
+
+## Développement
+
+Prérequis : Node.js 22, npm, Git, Windows 10 ou 11 et, si la dépendance native doit être reconstruite, Visual Studio Build Tools.
+
+```powershell
 npm install
 npm run verify
+```
+
+Utilisez ensuite deux terminaux.
+
+Terminal 1 — serveur et site :
+
+```powershell
+npm run server
+```
+
+Terminal 2 — application :
+
+```powershell
 npm start
 ```
 
-## Connexion entre deux PC
+L’application utilise `http://127.0.0.1:3000` par défaut.
 
-Les deux applications doivent utiliser le même serveur de signalisation. Dans **Paramètres > Serveur de connexion**, saisissez la même URL HTTPS sur les deux ordinateurs. Le serveur peut être lancé séparément avec :
+## Configuration Internet
 
-```bash
-PORT=3000 npm run server
+Copiez `.env.example` vers `.env`. Le fichier est chargé automatiquement au démarrage et reste exclu de Git.
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-Pour une connexion Internet fiable derrière certains routeurs, ajoutez aussi un serveur TURN dans la configuration WebRTC. Le STUN public seul ne garantit pas toutes les connexions.
+Variables principales :
 
-## Créer et publier Windows
+| Variable | Utilisation |
+| --- | --- |
+| `PORT`, `HOST` | Adresse d’écoute du serveur |
+| `PUBLIC_ORIGIN` | Domaine HTTPS autorisé |
+| `MAX_FILE_MB` | Taille maximale d’un fichier |
+| `MADRADOR_SIGNAL_URL` | URL HTTPS du serveur utilisée par l’application |
+| `MADRADOR_TURN_URL` | Adresse du serveur TURN |
+| `MADRADOR_TURN_USERNAME` | Identifiant TURN |
+| `MADRADOR_TURN_CREDENTIAL` | Secret TURN |
 
-Sous Windows, lancez `PUBLICATION-TOTALE.bat`. Le script vérifie le code, crée l'installateur, publie le dépôt, puis tente de publier l'EXE dans une Release. Un échec de Release n'annule plus le build ni le push Git.
+Pour une utilisation entre deux réseaux différents, configurez impérativement HTTPS et un serveur TURN. Un serveur STUN seul ne garantit pas la connexion.
 
-GitHub Actions reconstruit aussi automatiquement l'installateur à chaque push sur `main`.
+## Tests et création de l’installeur
+
+```powershell
+npm run verify
+npm run build
+```
+
+La validation contrôle la syntaxe, le serveur, la création et l’approbation d’une session, les fichiers indispensables au packaging et les protections Electron. Un tag Git `v*` crée automatiquement une release et son installeur Windows.
 
 ## Sécurité
 
-- validation manuelle obligatoire avant chaque session ;
-- permissions séparées pour contrôle, presse-papiers, fichiers et audio ;
-- contrôle désactivé par défaut ;
-- contexte Electron isolé et Node désactivé dans la page ;
-- codes temporaires et expiration automatique ;
-- aucune fonction furtive ou connexion silencieuse.
+- aucune connexion silencieuse ;
+- isolation et sandbox du renderer Electron ;
+- API système limitée au preload ;
+- validation de l’appartenance à chaque session ;
+- expiration automatique des codes ;
+- contrôle désactivé à l’arrêt ;
+- taille des échanges limitée ;
+- secrets exclus du dépôt.
+
+## Limites connues
+
+- aucun serveur public ou TURN n’est fourni par ce dépôt ;
+- l’application n’est pas encore signée avec un certificat public ;
+- les environnements multi-écrans et multi-réseaux doivent encore être testés à grande échelle ;
+- aucune licence open source n’est accordée tant qu’un fichier `LICENSE` n’a pas été choisi par le propriétaire.
+
+## Dépannage
+
+- **Serveur inaccessible** : vérifiez l’URL, le port 3000 et le pare-feu.
+- **Code invalide** : créez un nouveau code ; il expire après dix minutes.
+- **Écran noir** : resélectionnez la source et vérifiez les autorisations Windows.
+- **WebRTC bloqué** : configurez TURN ; STUN seul ne suffit pas partout.
+- **Contrôle indisponible** : vérifiez `nut-js`, les permissions et les restrictions antivirus.
+- **SmartScreen** : l’installeur n’est pas encore signé avec un certificat public.
+- **Audio indisponible** : la capture audio système reste expérimentale.
+
+## Documentation
+
+- [Audit](AUDIT.md)
+- [Architecture](ARCHITECTURE.md)
+- [Sécurité](SECURITY.md)
+- [Déploiement](DEPLOYMENT.md)
+- [Roadmap](ROADMAP.md)
+- [Contribution](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+
+## Liens
+
+- [Dépôt GitHub](https://github.com/Madrador60/partager-son-ecran)
+- [Pull requests](https://github.com/Madrador60/partager-son-ecran/pulls)
+- [Releases](https://github.com/Madrador60/partager-son-ecran/releases)
+- [Rapporter un problème](https://github.com/Madrador60/partager-son-ecran/issues/new)
