@@ -167,6 +167,31 @@ La validation contrôle la syntaxe, le serveur, la création et l’approbation 
 
 ## Publier une nouvelle version
 
+### Signature Windows obligatoire
+
+Les Releases publiques doivent être signées avec un certificat Authenticode délivré
+par une autorité reconnue. Le workflow refuse désormais de publier un installateur
+non signé afin d’éviter d’afficher « Éditeur inconnu ».
+
+Ajoutez ces secrets dans **Settings → Secrets and variables → Actions** :
+
+- `WIN_CSC_LINK` : certificat Windows `.pfx` encodé en Base64 ;
+- `WIN_CSC_KEY_PASSWORD` : mot de passe du certificat.
+
+Pour encoder le certificat dans PowerShell :
+
+```powershell
+[Convert]::ToBase64String(
+  [IO.File]::ReadAllBytes("C:\chemin\certificat.pfx")
+) | Set-Clipboard
+```
+
+Ne placez jamais le certificat ou son mot de passe dans le dépôt. Une signature
+valide remplace « Éditeur inconnu » par le nom vérifié du titulaire. SmartScreen
+peut toutefois rester visible temporairement pendant que cette identité acquiert
+sa réputation. Une distribution MSIX via le Microsoft Store est la solution
+garantissant l’absence de l’avertissement SmartScreen.
+
 Deux méthodes sont disponibles :
 
 0. sous Windows, double-cliquer sur `PUBLIER-UNE-VERSION.bat`. Le script se place automatiquement dans le dépôt, vérifie la branche et les fichiers, demande la version, lance les tests puis pousse le commit et le tag ;

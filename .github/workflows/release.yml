@@ -25,6 +25,8 @@ jobs:
       NODE_VERSION: 22.x
       RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -59,8 +61,31 @@ jobs:
       - name: Verify source
         run: npm run verify
 
+      - name: Require Windows code-signing certificate
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+            throw "Secret GitHub manquant: WIN_CSC_LINK. Publication non signée interdite."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)) {
+            throw "Secret GitHub manquant: WIN_CSC_KEY_PASSWORD. Publication non signée interdite."
+          }
+
       - name: Build Windows installer and updater metadata
         run: npm run dist
+
+      - name: Verify Authenticode signatures
+        shell: pwsh
+        run: |
+          $installer = Get-Item "dist/Madrador-Remote-Setup-$env:VERSION.exe" -ErrorAction Stop
+          $executables = @($installer) + @(Get-ChildItem "dist/win-unpacked" -Filter "*.exe" -Recurse)
+          foreach ($executable in $executables) {
+            $signature = Get-AuthenticodeSignature $executable.FullName
+            if ($signature.Status -ne "Valid") {
+              throw "Signature Authenticode invalide ou absente: $($executable.Name) ($($signature.Status))"
+            }
+            Write-Host "$($executable.Name) signé par $($signature.SignerCertificate.Subject)"
+          }
 
       - name: Generate SHA-256
         shell: pwsh
