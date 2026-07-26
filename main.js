@@ -155,7 +155,10 @@ function configureUpdater() {
       publishUpdaterStatus("error", { message: `Échec de la vérification d’intégrité : ${error.message}` });
     }
   });
-  autoUpdater.on("error", (error) => publishUpdaterStatus("error", { message: error.message }));
+  autoUpdater.on("error", (error) => {
+    console.error("Updater:", error.message);
+    publishUpdaterStatus("error", { message: "Aucune mise à jour complète n’est publiée pour le moment. Réessayez après la prochaine Release." });
+  });
 }
 
 async function verifyOptionalSha256(info) {

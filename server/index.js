@@ -7,7 +7,7 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const { z } = require("zod");
 const { Server } = require("socket.io");
-const { SessionCode, Permissions } = require("../src/shared/validation");
+const { SessionCode, Permissions, SessionDuration } = require("../src/shared/validation");
 const releases = require("../src/services/github-releases");
 
 const SESSION_TTL = 10 * 60_000;
@@ -25,7 +25,8 @@ function clean(value, max = 2000) {
 }
 
 function permissions(value = {}) {
-  return { control: Boolean(value.control), clipboard: Boolean(value.clipboard), files: Boolean(value.files) };
+  const control = Boolean(value.control || value.mouse || value.keyboard);
+  return { control, mouse: Boolean(value.mouse || control), keyboard: Boolean(value.keyboard || control), clipboard: Boolean(value.clipboard), files: Boolean(value.files), audio: Boolean(value.audio) };
 }
 
 function code() {
@@ -65,6 +66,7 @@ app.use((_req, res, next) => {
 });
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-7", legacyHeaders: false }));
 app.use(express.static(path.join(__dirname, "..", "website")));
+app.get("/shared/capabilities.js", (_req, res) => res.sendFile(path.join(__dirname, "..", "public", "shared", "capabilities.js")));
 app.get("/logo.png", (_req, res) => res.sendFile(path.join(__dirname, "..", "assets", "logo.png")));
 app.get("/remote", (_req, res) => res.sendFile(path.join(__dirname, "..", "website", "remote.html")));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "madrador-signal" }));
@@ -103,16 +105,17 @@ const io = new Server(server, {
 io.on("connection", (socket) => {
   socket.data.lastInput = 0;
 
-  socket.on("host-create", ({ deviceName, permissions: allowed } = {}) => {
-    const parsed = z.object({ deviceName: z.string().max(80).optional(), permissions: Permissions.optional() }).safeParse({ deviceName, permissions: allowed });
+  socket.on("host-create", ({ deviceName, permissions: allowed, durationMinutes = 0 } = {}) => {
+    const parsed = z.object({ deviceName: z.string().max(80).optional(), permissions: Permissions.optional(), durationMinutes: SessionDuration }).safeParse({ deviceName, permissions: allowed, durationMinutes });
     if (!parsed.success) return socket.emit("protocol-error", { code: "INVALID_HOST_CREATE" });
     const previous = socketSession.get(socket.id);
     if (previous) sessions.delete(previous);
     const sessionCode = code();
-    sessions.set(sessionCode, { host: socket.id, viewer: null, pending: new Set(), expiresAt: Date.now() + SESSION_TTL, deviceName: clean(deviceName, 80), permissions: permissions(allowed) });
+    const expiresAt = parsed.data.durationMinutes === 0 ? null : Date.now() + parsed.data.durationMinutes * 60_000;
+    sessions.set(sessionCode, { host: socket.id, viewer: null, pending: new Set(), expiresAt, deviceName: clean(deviceName, 80), permissions: permissions(allowed) });
     socketSession.set(socket.id, sessionCode);
     socket.join(sessionCode);
-    socket.emit("host-created", { code: sessionCode, expiresAt: Date.now() + SESSION_TTL });
+    socket.emit("host-created", { code: sessionCode, expiresAt });
   });
 
   socket.on("viewer-request", ({ code: requestedCode, deviceName } = {}) => {
@@ -120,7 +123,7 @@ io.on("connection", (socket) => {
     if (!parsedCode.success) return socket.emit("viewer-denied", { reason: "Code invalide." });
     const sessionCode = parsedCode.data;
     const session = sessions.get(sessionCode);
-    if (!session || session.expiresAt < Date.now() || session.viewer) return socket.emit("viewer-denied", { reason: "Code invalide, expiré ou déjà utilisé." });
+    if (!session || (session.expiresAt && session.expiresAt < Date.now()) || session.viewer) return socket.emit("viewer-denied", { reason: "Code invalide, expiré ou déjà utilisé." });
     session.pending.add(socket.id);
     socket.data.pendingCode = sessionCode;
     io.to(session.host).emit("incoming-request", { viewerSocketId: socket.id, deviceName: clean(deviceName, 80) });
@@ -210,7 +213,7 @@ io.on("connection", (socket) => {
 
 const cleanup = setInterval(() => {
   for (const [sessionCode, session] of sessions) {
-    if (session.expiresAt < Date.now() && !session.viewer) {
+    if (session.expiresAt && session.expiresAt < Date.now() && !session.viewer) {
       io.to(session.host).emit("session-expired");
       sessions.delete(sessionCode);
     }

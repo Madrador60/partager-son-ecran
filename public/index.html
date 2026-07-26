@@ -51,7 +51,7 @@
             <p class="muted-text">Partagez ce code temporaire avec une personne de confiance.</p>
             <div class="code-box"><span id="localCode">— — — — —</span><button id="copyCode" aria-label="Copier le code" disabled>⧉</button></div>
             <div class="code-meta"><span>Expiration <b id="codeTimer">10:00</b></span><span><i class="health-dot"></i><b id="availabilityText">Disponible</b></span></div>
-            <div class="stack-actions"><button id="chooseSource" class="button secondary">▣ <span id="sourceLabel">Choisir un écran</span></button><button id="createSession" class="button primary">Générer un nouveau code</button></div>
+            <div class="stack-actions"><label for="sessionDurationSelect">Durée de la session</label><select id="sessionDurationSelect"><option value="0">Illimitée (par défaut)</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 heure</option><option value="120">2 heures</option><option value="480">8 heures</option></select><button id="chooseSource" class="button secondary">▣ <span id="sourceLabel">Choisir un écran</span></button><button id="createSession" class="button primary">Générer un nouveau code</button></div>
           </article>
 
           <article class="connect-device glass">

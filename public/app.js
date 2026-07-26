@@ -1,9 +1,12 @@
+import { captureDisplay, detectPlatform } from "./shared/capabilities.js";
+
 const bridge = window.remoteAssist;
 const $ = (id) => document.getElementById(id);
 const SERVER_KEY = "madrador.server";
 const HISTORY_KEY = "madrador.history";
 const RECENTS_KEY = "madrador.recents";
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const platform = detectPlatform(bridge);
 
 const state = {
   socket: null,
@@ -223,13 +226,13 @@ function bindSocket(socket) {
     $("connectionLabel").textContent = "Serveur hors ligne";
   });
   socket.on("connect_error", () => notify("Serveur inaccessible. Nouvelle tentative automatique.", "error"));
-  socket.on("host-created", ({ code }) => {
+  socket.on("host-created", ({ code, expiresAt }) => {
     state.sessionCode = code;
     $("localCode").textContent = formatCode(code);
     $("copyCode").disabled = false;
     $("codeState").textContent = "Code actif";
     $("codeState").classList.remove("muted");
-    state.codeExpiresAt = Date.now() + 10 * 60 * 1000;
+    state.codeExpiresAt = expiresAt || 0;
     startCodeTimer();
     bridge.setHostCode(code);
     notify("Code prêt pendant 10 minutes", "success");
@@ -307,10 +310,7 @@ async function chooseSource() {
     button.onclick = async (event) => {
       event.preventDefault();
       state.stream?.getTracks().forEach((track) => track.stop());
-      state.stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: source.id, maxWidth: 2560, maxHeight: 1440, maxFrameRate: 60 } }
-      });
+      state.stream = await captureDisplay({ bridge, sourceId: source.id });
       state.selectedBounds = source.bounds;
       $("localVideo").srcObject = state.stream;
       $("sourceLabel").textContent = source.name;
@@ -364,6 +364,10 @@ function startDuration() {
 }
 function startCodeTimer() {
   clearInterval(state.codeTimer);
+  if (!state.codeExpiresAt) {
+    $("codeTimer").textContent = "Illimitée";
+    return;
+  }
   const tick = () => {
     const remaining = Math.max(0, Math.ceil((state.codeExpiresAt - Date.now()) / 1000));
     $("codeTimer").textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
@@ -413,6 +417,7 @@ function sendInput(type, event, extra = {}) {
 
 async function init() {
   if (!bridge) throw new Error("API Electron indisponible");
+  document.body.dataset.platform = platform.kind;
   const info = await bridge.systemInfo();
   $("deviceLabel").textContent = `${info.hostname} · ${info.displays} écran(s)`;
   $("computerName").textContent = info.hostname;
@@ -435,7 +440,7 @@ async function init() {
   $("createSession").onclick = () => {
     if (!state.stream) return notify("Choisissez d’abord un écran", "error");
     state.permissions = activePermissions();
-    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions });
+    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions, durationMinutes: Number($("sessionDurationSelect").value) });
     notify("Création du code…");
   };
   $("connect").onclick = () => {
@@ -537,7 +542,7 @@ async function init() {
   bridge.onOpenUpdateDialog(() => $("updateDialog").showModal());
   $("updateButton").onclick = () => bridge.updateAction($("updateButton").dataset.action || "check").then((result) => {
     if (!result.ok) notify(result.error, "error");
-  }).catch((error) => notify(error.message, "error"));
+  }).catch(() => notify("La mise à jour est momentanément indisponible. Aucun fichier latest.yml n’est encore publié.", "error"));
   $("closeUpdateDialog").onclick = () => $("updateDialog").close();
   $("updateLater").onclick = () => {
     if (state.update.status === "downloaded") bridge.updateAction("later");
@@ -546,7 +551,7 @@ async function init() {
   };
   $("updatePrimary").onclick = () => {
     const action = state.update.status === "downloaded" ? "install" : "download";
-    bridge.updateAction(action).catch((error) => notify(error.message, "error"));
+    bridge.updateAction(action).catch(() => notify("Impossible de lancer cette mise à jour pour le moment.", "error"));
   };
   renderRecents();
   renderHistory();
@@ -582,7 +587,7 @@ function updateUpdater(data) {
     downloading: ["Téléchargement en cours", `${data.percent}% téléchargés`],
     downloaded: [`Version ${data.version} prête`, "Installez maintenant ou au prochain redémarrage."],
     scheduled: ["Installation planifiée", "La mise à jour sera installée à la fermeture de l’application."],
-    error: ["Mise à jour indisponible", data.message || "Réessayez plus tard."]
+    error: ["Mise à jour indisponible", "Aucune mise à jour complète n’est publiée pour le moment. Réessayez plus tard."]
   };
   const [title, description] = labels[data.status] || labels.error;
   $("updateTitle").textContent = title;

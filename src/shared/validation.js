@@ -27,8 +27,13 @@ const SaveFile = z.object({
 const SessionCode = z.string().regex(/^\d{9}$/);
 const Permissions = z.object({
   control: z.boolean().default(false),
+  mouse: z.boolean().default(false),
+  keyboard: z.boolean().default(false),
   clipboard: z.boolean().default(false),
-  files: z.boolean().default(false)
+  files: z.boolean().default(false),
+  audio: z.boolean().default(false)
 }).strict();
 
-module.exports = { Bounds, ControlConfig, RemoteInput, SaveFile, SessionCode, Permissions };
+const SessionDuration = z.number().int().min(0).max(7 * 24 * 60).default(0);
+
+module.exports = { Bounds, ControlConfig, RemoteInput, SaveFile, SessionCode, Permissions, SessionDuration };

@@ -16,12 +16,12 @@ Le bouton du site interroge l’API GitHub côté serveur avec un cache de dix m
 
 La page [Releases](https://github.com/Madrador60/partager-son-ecran/releases) sert uniquement de secours, d’historique et de consultation des checksums. Sans release contenant un fichier `Madrador-Remote-Setup-*.exe`, le téléchargement direct ne peut pas fonctionner.
 
-## Utiliser Madrador Remote sans installer l’application
+## Utiliser Madrador Remote dans un navigateur
 
-L’application Windows reste obligatoire sur le PC hôte. Le viewer peut utiliser Chrome, Edge ou un navigateur WebRTC compatible :
+La page `/remote` propose deux modes : **Partager mon PC** et **Se connecter à un PC**. Un navigateur récent peut héberger une session en partageant un écran, une fenêtre ou un onglet via `getDisplayMedia()`, ou rejoindre une session existante.
 
-1. ouvrir l’application sur le PC distant ;
-2. choisir l’écran puis créer un code ;
+1. ouvrir l’application ou le site sur le PC distant ;
+2. choisir l’écran, la fenêtre ou l’onglet puis créer un code ;
 3. ouvrir `/remote` sur le site Madrador Remote ;
 4. saisir le code à neuf chiffres ;
 5. accepter la demande sur le PC distant ;
@@ -29,22 +29,23 @@ L’application Windows reste obligatoire sur le PC hôte. Le viewer peut utilis
 
 | Fonction | Application Windows | Interface web |
 | --- | ---: | ---: |
-| Héberger une session | Oui | Non |
+| Héberger une session | Oui | Oui, avec `getDisplayMedia()` |
 | Se connecter à un PC | Oui | Oui |
 | Voir l’écran distant | Oui | Oui |
-| Contrôle souris | Basique | Basique, avec autorisation |
-| Contrôle clavier | Basique | Partiel selon le navigateur |
+| Contrôle souris | Oui | Oui comme viewer ; non comme hôte navigateur |
+| Contrôle clavier | Oui | Partiel comme viewer ; non comme hôte navigateur |
 | Transfert de fichiers | Limité | Limité, par DataChannel |
 | Presse-papiers texte | Oui | Limité par le navigateur |
 | Accès sans surveillance | Non | Non |
 | Service Windows | Non | Non |
 | Installation nécessaire | Oui | Non pour le viewer |
 
-Le navigateur ne peut pas devenir un agent Windows permanent et certains raccourcis clavier sont réservés par le système.
+Le navigateur ne peut pas devenir un agent Windows permanent, injecter des actions dans Windows quand il héberge une session, ni intercepter certains raccourcis système. L’interface désactive ces permissions et explique la limite. L’application reste nécessaire pour le contrôle complet et l’accès système.
 
 ## Fonctionnalités disponibles
 
 - code temporaire à neuf chiffres ;
+- durée illimitée par défaut ou arrêt automatique configurable ;
 - approbation obligatoire sur le PC partagé ;
 - choix de l’écran ou de la fenêtre ;
 - contrôle clavier et souris révocable ;
@@ -69,9 +70,9 @@ Le menu de la zone de notification permet de rouvrir l’application, copier l�
 
 L’interface respecte `prefers-reduced-motion`. Les statistiques WebRTC sont relevées à intervalle limité afin d’éviter une charge inutile pendant la vidéo.
 
-## États du viewer web
+## États du site web
 
-La page `/remote` affiche séparément la saisie du code, l’attente d’autorisation, la négociation WebRTC, les erreurs récupérables et la session active. Pendant une session, la vidéo occupe l’espace principal et les outils moins fréquents sont regroupés dans des panneaux latéraux. Le viewer web utilise le même serveur Socket.IO et la même connexion WebRTC que l’application Windows.
+La page `/remote` affiche séparément le choix du mode, la capture, le code hôte, l’attente d’autorisation, la négociation WebRTC, les erreurs récupérables et la session active. Pendant une session, la vidéo occupe l’espace principal et les outils moins fréquents sont regroupés dans des panneaux latéraux. Le site utilise le même serveur Socket.IO et la même connexion WebRTC que l’application Windows, ce qui permet navigateur ↔ application et navigateur ↔ navigateur selon les capacités de chaque plateforme.
 
 ## Expérimental ou planifié
 
@@ -168,6 +169,8 @@ La validation contrôle la syntaxe, le serveur, la création et l’approbation 
 
 Deux méthodes sont disponibles :
 
+0. sous Windows, double-cliquer sur `PUBLIER-UNE-VERSION.bat`. Le script se place automatiquement dans le dépôt, vérifie la branche et les fichiers, demande la version, lance les tests puis pousse le commit et le tag ;
+
 1. mettre à jour `package.json` et `package-lock.json`, puis pousser un tag correspondant ;
 
    ```powershell
@@ -214,7 +217,7 @@ Au démarrage, la version installée vérifie GitHub au maximum une fois toutes 
 ## Dépannage
 
 - **Serveur inaccessible** : vérifiez l’URL, le port 3000 et le pare-feu.
-- **Code invalide** : créez un nouveau code ; il expire après dix minutes.
+- **Code invalide** : créez un nouveau code et vérifiez que sa durée configurée n’est pas terminée.
 - **Écran noir** : resélectionnez la source et vérifiez les autorisations Windows.
 - **WebRTC bloqué** : configurez TURN ; STUN seul ne suffit pas partout.
 - **Contrôle indisponible** : vérifiez `nut-js`, les permissions et les restrictions antivirus.
