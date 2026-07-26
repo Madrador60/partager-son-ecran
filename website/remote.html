@@ -1,8 +1,50 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'"><title>Connexion web — Madrador Remote</title><link rel="stylesheet" href="/remote.css"></head>
-<body><header class="remote-nav"><a href="/" class="brand"><img src="/logo.png" alt=""><span>Madrador Remote</span></a><b id="status">Prêt</b><button id="leave" disabled>Quitter</button></header>
-<main class="remote-shell">
-  <section id="connectPanel" class="connect-card"><span>VIEWER WEB</span><h1>Se connecter à un PC</h1><p>L’application Madrador Remote doit être ouverte sur le PC distant.</p><label for="code">Code à neuf chiffres</label><input id="code" maxlength="11" inputmode="numeric" placeholder="000 000 000"><button id="connect">Demander la connexion</button><small>Aucun code ni contenu de session n’est enregistré dans ce navigateur.</small></section>
-  <section id="sessionPanel" hidden><div class="tools"><button id="fit">Ajuster</button><button id="zoomOut">−</button><b id="zoomLabel">100 %</b><button id="zoomIn">+</button><button id="fullscreen">Plein écran</button><span id="permissions">Lecture seule</span></div><div id="stage"><video id="video" autoplay playsinline tabindex="0"></video></div><div class="stats"><span>Latence <b id="latency">—</b></span><span>Codec <b id="codec">—</b></span><span>Connexion <b id="network">—</b></span><span>Résolution <b id="resolution">—</b></span></div><div class="exchange"><div><h2>Discussion</h2><div id="messages"></div><input id="message" placeholder="Message"><button id="sendMessage">Envoyer</button></div><div><h2>Presse-papiers</h2><textarea id="clipboard"></textarea><button id="sendClipboard">Partager le texte</button></div><div><h2>Fichier</h2><input id="file" type="file"><button id="sendFile">Envoyer par WebRTC</button><p id="fileStatus"></p></div></div></section>
-  <noscript>JavaScript est nécessaire pour utiliser la connexion distante.</noscript>
-</main><script src="/socket.io/socket.io.js"></script><script type="module" src="/remote.js"></script></body></html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
+  <title>Connexion web — Madrador Remote</title><link rel="stylesheet" href="/remote.css"><link rel="stylesheet" href="/remote-state.css">
+</head>
+<body>
+  <div class="ambient a"></div><div class="ambient b"></div>
+  <header class="remote-nav"><a href="/" class="brand"><span><img src="/logo.png" alt=""></span><b>Madrador <em>Remote</em></b></a><div class="server-state"><i id="serverDot"></i><b id="status">Connexion au serveur…</b></div><button id="leave" disabled>Quitter la session</button></header>
+  <main class="remote-shell">
+    <section id="connectPanel" class="connect-layout">
+      <div class="intro">
+        <span class="eyebrow">ACCÈS WEB SÉCURISÉ</span><h1>Contrôlez un PC.<br><em>Depuis votre navigateur.</em></h1><p>Aucune installation n’est nécessaire sur cet appareil. Madrador Remote doit simplement être ouvert sur le PC distant.</p>
+        <div class="trust-grid"><article><span>⌁</span><div><b>Connexion WebRTC</b><small>Flux direct et chiffré</small></div></article><article><span>✓</span><div><b>Consentement requis</b><small>L’hôte garde le contrôle</small></div></article><article><span>◷</span><div><b>Code temporaire</b><small>Expire automatiquement</small></div></article></div>
+        <p class="privacy">● Aucun code ni contenu de session n’est conservé dans ce navigateur.</p>
+      </div>
+      <div class="connect-card">
+        <div class="card-icon">↗</div><span class="eyebrow">REJOINDRE UNE SESSION</span><h2>Se connecter à un appareil</h2><p>Demandez à l’utilisateur distant son code à neuf chiffres.</p>
+        <label for="code">ID de connexion</label><div class="code-input"><span>⌁</span><input id="code" maxlength="11" inputmode="numeric" autocomplete="one-time-code" placeholder="000 000 000"></div>
+        <button id="connect"><span>Connexion sécurisée</span><b>→</b></button>
+        <div id="connectionProgress" class="connection-progress" hidden><i></i><div><b id="progressTitle">Demande envoyée</b><small id="progressDetail">En attente de l’autorisation du PC distant…</small></div><button id="cancelConnect">Annuler</button></div>
+        <div id="connectError" class="connect-error" hidden><b>Connexion impossible</b><span id="errorDetail"></span><button id="retryConnect">Réessayer</button></div>
+        <footer><span>Compatible Chrome, Edge et Firefox récents</span><a href="/#download">Installer l’application</a></footer>
+      </div>
+    </section>
+
+    <section id="sessionPanel" class="session-panel" hidden>
+      <div class="session-top"><div class="remote-device"><span>PC</span><div><b>Appareil distant</b><small><i></i> Session active</small></div></div><div class="session-meta"><span><b id="sessionDuration">00:00:00</b><small>Durée</small></span><span><b id="networkTop">—</b><small>Connexion</small></span><span id="permissions">Lecture seule</span></div></div>
+      <div class="workspace">
+        <div id="stage"><video id="video" autoplay playsinline tabindex="0"></video><div id="videoLoader"><i></i><b>Préparation du flux distant…</b></div>
+          <div class="tools">
+            <button id="fullscreen" title="Plein écran">⛶<small>Plein écran</small></button><button id="fit" title="Ajuster">⊡<small>Ajuster</small></button><button id="actual" title="Taille réelle">1:1<small>Réel</small></button>
+            <button id="zoomOut">−</button><b id="zoomLabel">100 %</b><button id="zoomIn">＋</button><i></i>
+            <button data-drawer="statsPanel">⌁<small>Qualité</small></button><button id="audio">♬<small>Audio</small></button><button data-drawer="clipboardPanel">⧉<small>Presse-papiers</small></button><button data-drawer="filePanel">⇧<small>Fichiers</small></button><button data-drawer="chatPanel">◌<small>Chat</small></button>
+          </div>
+        </div>
+        <aside id="drawer"><button id="closeDrawer">×</button>
+          <section id="chatPanel" class="drawer-panel"><h2>Discussion</h2><div id="messages"></div><div class="compose"><input id="message" placeholder="Votre message"><button id="sendMessage">↑</button></div></section>
+          <section id="clipboardPanel" class="drawer-panel"><h2>Presse-papiers</h2><p>Seul le texte choisi est envoyé.</p><textarea id="clipboard"></textarea><button id="sendClipboard" class="primary">Partager le texte</button></section>
+          <section id="filePanel" class="drawer-panel"><h2>Fichiers</h2><p>Transfert direct par WebRTC, 25 Mo maximum.</p><label for="file" class="drop">⇧<b>Choisir un fichier</b></label><input id="file" type="file"><button id="sendFile" class="primary">Envoyer par WebRTC</button><p id="fileStatus"></p></section>
+          <section id="statsPanel" class="drawer-panel"><h2>Statistiques</h2><div class="stats"><span>Latence <b id="latency">—</b></span><span>Codec <b id="codec">—</b></span><span>Connexion <b id="network">—</b></span><span>Résolution <b id="resolution">—</b></span></div></section>
+        </aside>
+      </div>
+    </section>
+    <noscript>JavaScript est nécessaire pour utiliser la connexion distante.</noscript>
+  </main>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="/socket.io/socket.io.js"></script><script type="module" src="/remote.js"></script>
+</body></html>

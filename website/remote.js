@@ -6,13 +6,34 @@ let permissions = {};
 let candidates = [];
 let zoom = 1;
 let statsTimer;
+let durationTimer;
+let startedAt;
 const channels = {};
 let incomingFile;
 
 function setStatus(text) { $("status").textContent = text; }
+function toast(text) {
+  const item = document.createElement("div");
+  item.className = "toast";
+  item.textContent = text;
+  $("toasts").append(item);
+  setTimeout(() => item.remove(), 4000);
+}
+function setConnecting(active, title = "Demande envoyée", detail = "En attente de l’autorisation du PC distant…") {
+  $("connectionProgress").hidden = !active;
+  $("connect").disabled = active;
+  $("progressTitle").textContent = title;
+  $("progressDetail").textContent = detail;
+}
+function showError(message) {
+  setConnecting(false);
+  $("errorDetail").textContent = message;
+  $("connectError").hidden = false;
+}
 function formatCode(value) { return value.replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 "); }
 function end() {
   clearInterval(statsTimer);
+  clearInterval(durationTimer);
   peer?.close();
   peer = null;
   $("video").srcObject = null;
@@ -21,6 +42,7 @@ function end() {
   $("leave").disabled = true;
   code = null;
   setStatus("Session terminée");
+  setConnecting(false);
 }
 
 async function createPeer() {
@@ -33,10 +55,20 @@ async function createPeer() {
     $("connectPanel").hidden = true;
     $("sessionPanel").hidden = false;
     $("leave").disabled = false;
+    $("videoLoader").hidden = true;
+    setConnecting(false);
+    $("connectError").hidden = true;
+    startedAt = Date.now();
+    clearInterval(durationTimer);
+    durationTimer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      $("sessionDuration").textContent = [Math.floor(elapsed / 3600), Math.floor(elapsed % 3600 / 60), elapsed % 60].map((part) => String(part).padStart(2, "0")).join(":");
+    }, 1000);
     $("video").focus();
   };
   peer.onconnectionstatechange = () => {
     setStatus(peer.connectionState === "connected" ? "Session active" : peer.connectionState);
+    if (peer.connectionState === "failed") showError("La liaison WebRTC n’a pas pu être établie.");
     if (["failed", "closed"].includes(peer.connectionState)) end();
   };
   peer.ondatachannel = ({ channel }) => {
@@ -63,15 +95,17 @@ async function createPeer() {
   return peer;
 }
 
-socket.on("connect", () => setStatus("Serveur connecté"));
+socket.on("connect", () => { setStatus("Serveur connecté"); $("serverDot").classList.add("online"); });
 socket.on("disconnect", () => setStatus("Reconnexion au serveur…"));
-socket.on("viewer-denied", ({ reason }) => setStatus(reason));
+socket.on("disconnect", () => $("serverDot").classList.remove("online"));
+socket.on("viewer-denied", ({ reason }) => { setStatus(reason); showError(reason); });
 socket.on("viewer-approved", async (data) => {
   code = data.code;
   permissions = data.permissions;
   $("permissions").textContent = permissions.control ? "Contrôle autorisé" : "Lecture seule";
   await createPeer();
   setStatus("Négociation WebRTC…");
+  setConnecting(true, "Autorisation reçue", "Négociation de la connexion WebRTC…");
 });
 socket.on("permissions-state", (value) => {
   permissions = value;
@@ -95,8 +129,9 @@ socket.on("chat-message", ({ text }) => {
   const line = document.createElement("div");
   line.textContent = text;
   $("messages").appendChild(line);
+  toast("Nouveau message reçu");
 });
-socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; });
+socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Presse-papiers synchronisé"); });
 socket.on("session-ended", end);
 
 $("code").oninput = (event) => { event.target.value = formatCode(event.target.value); };
@@ -106,15 +141,26 @@ $("connect").onclick = () => {
   code = value;
   socket.emit("viewer-request", { code, deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim() });
   setStatus("Attente de l’autorisation du PC distant…");
+  $("connectError").hidden = true;
+  setConnecting(true);
 };
+$("cancelConnect").onclick = () => { if (code) socket.emit("end-session", { code }); end(); };
+$("retryConnect").onclick = () => { $("connectError").hidden = true; $("connect").click(); };
 $("leave").onclick = () => {
   if (code) socket.emit("end-session", { code });
   end();
 };
 $("fullscreen").onclick = () => $("stage").requestFullscreen();
 $("fit").onclick = () => { zoom = 1; updateZoom(); };
+$("actual").onclick = () => { zoom = 1; $("video").style.maxWidth = "none"; $("video").style.maxHeight = "none"; updateZoom(); };
 $("zoomIn").onclick = () => { zoom = Math.min(3, zoom + .25); updateZoom(); };
 $("zoomOut").onclick = () => { zoom = Math.max(.5, zoom - .25); updateZoom(); };
+$("audio").onclick = () => { $("audio").classList.toggle("active"); toast("Préférence audio mise à jour"); };
+document.querySelectorAll("[data-drawer]").forEach((button) => button.onclick = () => {
+  $("drawer").classList.add("open");
+  document.querySelectorAll(".drawer-panel").forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.drawer));
+});
+$("closeDrawer").onclick = () => $("drawer").classList.remove("open");
 function updateZoom() {
   $("video").style.transform = `scale(${zoom})`;
   $("zoomLabel").textContent = `${Math.round(zoom * 100)} %`;
@@ -186,9 +232,13 @@ function monitor() {
         $("latency").textContent = `${Math.round((item.currentRoundTripTime || 0) * 1000)} ms`;
         const remote = report.get(item.remoteCandidateId);
         $("network").textContent = remote?.candidateType === "relay" ? "TURN" : "Directe";
+        $("networkTop").textContent = remote?.candidateType === "relay" ? "Relais TURN" : "Directe";
       }
     });
   }, 1500);
 }
 
-if (!window.RTCPeerConnection || !window.WebSocket) setStatus("Ce navigateur ne prend pas en charge WebRTC.");
+if (!window.RTCPeerConnection || !window.WebSocket) {
+  setStatus("Navigateur incompatible");
+  showError("Ce navigateur ne prend pas en charge les technologies nécessaires.");
+}

@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { app, BrowserWindow, Menu, ipcMain, desktopCapturer, screen, clipboard, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, ipcMain, desktopCapturer, screen, clipboard, dialog, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const fs = require("node:fs/promises");
@@ -9,6 +9,11 @@ const { z } = require("zod");
 const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
 
 let window;
+let splash;
+let tray;
+let currentHostCode = "";
+let available = true;
+let sessionActive = false;
 let remoteControl = { enabled: false, bounds: null };
 
 function assertTrusted(event) {
@@ -19,6 +24,17 @@ function assertTrusted(event) {
 
 function createWindow() {
   Menu.setApplicationMenu(null);
+  splash = new BrowserWindow({
+    width: 460,
+    height: 300,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    webPreferences: { contextIsolation: true, sandbox: true }
+  });
+  splash.loadFile(path.join(__dirname, "public", "splash.html"), { query: { version: app.getVersion() } });
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -27,7 +43,7 @@ function createWindow() {
     show: false,
     title: "Madrador Remote",
     icon: path.join(__dirname, "assets", "icon.ico"),
-    backgroundColor: "#111827",
+    backgroundColor: "#070b17",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -36,8 +52,16 @@ function createWindow() {
     }
   });
   window.once("ready-to-show", () => {
+    splash?.close();
+    splash = null;
     window.maximize();
     window.show();
+  });
+  window.on("close", (event) => {
+    if (!app.isQuiting) {
+      event.preventDefault();
+      window.hide();
+    }
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -47,17 +71,90 @@ function createWindow() {
   window.loadFile(path.join(__dirname, "public", "index.html"));
 }
 
+function sendToRenderer(channel, payload) {
+  if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, "assets", "icon.ico");
+  tray = new Tray(nativeImage.createFromPath(iconPath));
+  const rebuild = () => {
+    tray.setToolTip(`Madrador Remote — ${sessionActive ? "Session active" : available ? "Disponible" : "Indisponible"}`);
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: "Ouvrir Madrador Remote", click: () => { window.show(); window.focus(); } },
+      { label: currentHostCode ? `Copier mon ID · ${currentHostCode}` : "Copier mon ID", enabled: Boolean(currentHostCode), click: () => clipboard.writeText(currentHostCode) },
+      { type: "separator" },
+      { label: "Disponible", type: "checkbox", checked: available, click: (item) => { available = item.checked; sendToRenderer("availability-changed", available); rebuild(); } },
+      { label: "Arrêter les connexions", enabled: sessionActive || Boolean(currentHostCode), click: () => sendToRenderer("stop-connections") },
+      { type: "separator" },
+      { label: "Quitter", click: () => { app.isQuiting = true; app.quit(); } }
+    ]));
+  };
+  tray.on("double-click", () => { window.show(); window.focus(); });
+  tray.rebuild = rebuild;
+  rebuild();
+}
+
+function publishUpdaterStatus(status, extra = {}) {
+  sendToRenderer("updater-status", { status, ...extra });
+}
+
+function configureUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.on("checking-for-update", () => publishUpdaterStatus("checking"));
+  autoUpdater.on("update-available", (info) => publishUpdaterStatus("available", { version: info.version, notes: info.releaseNotes || "" }));
+  autoUpdater.on("update-not-available", (info) => publishUpdaterStatus("current", { version: info.version }));
+  autoUpdater.on("download-progress", (progress) => publishUpdaterStatus("downloading", { percent: Math.round(progress.percent), transferred: progress.transferred, total: progress.total }));
+  autoUpdater.on("update-downloaded", (info) => publishUpdaterStatus("downloaded", { version: info.version, notes: info.releaseNotes || "" }));
+  autoUpdater.on("error", (error) => publishUpdaterStatus("error", { message: error.message }));
+}
+
 app.setAppUserModelId("com.madrador.remote");
 app.whenReady().then(() => {
   createWindow();
-  if (app.isPackaged) autoUpdater.checkForUpdatesAndNotify().catch((error) => console.error(error.message));
+  createTray();
+  configureUpdater();
+  if (app.isPackaged) autoUpdater.checkForUpdates().catch((error) => publishUpdaterStatus("error", { message: error.message }));
 });
-app.on("window-all-closed", () => process.platform !== "darwin" && app.quit());
+app.on("before-quit", () => { app.isQuiting = true; });
+app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
 
 ipcMain.handle("system-info", () => ({
   hostname: os.hostname(),
-  displays: screen.getAllDisplays().length
+  displays: screen.getAllDisplays().length,
+  platform: os.platform(),
+  localIp: Object.values(os.networkInterfaces()).flat().find((item) => item?.family === "IPv4" && !item.internal)?.address || "Indisponible",
+  version: app.getVersion()
 }));
+ipcMain.handle("set-host-code", (event, code) => {
+  assertTrusted(event);
+  currentHostCode = z.string().max(16).parse(code || "");
+  tray?.rebuild();
+  return { ok: true };
+});
+ipcMain.handle("set-session-active", (event, active) => {
+  assertTrusted(event);
+  sessionActive = Boolean(active);
+  tray?.rebuild();
+  if (sessionActive && Notification.isSupported()) new Notification({ title: "Madrador Remote", body: "Une session distante est maintenant active.", icon: path.join(__dirname, "assets", "icon.ico") }).show();
+  return { ok: true };
+});
+ipcMain.handle("show-notification", (event, payload = {}) => {
+  assertTrusted(event);
+  const title = z.string().max(80).parse(payload.title || "Madrador Remote");
+  const body = z.string().max(240).parse(payload.body || "");
+  if (Notification.isSupported()) new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.ico") }).show();
+  return { ok: true };
+});
+ipcMain.handle("update-action", async (event, action) => {
+  assertTrusted(event);
+  if (!app.isPackaged) return { ok: false, error: "Disponible dans la version installée" };
+  if (action === "check") await autoUpdater.checkForUpdates();
+  else if (action === "download") await autoUpdater.downloadUpdate();
+  else if (action === "install") autoUpdater.quitAndInstall(false, true);
+  else throw new Error("UPDATE_ACTION_INVALID");
+  return { ok: true };
+});
 
 ipcMain.handle("list-sources", async () => {
   const displays = screen.getAllDisplays();

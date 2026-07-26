@@ -8,85 +8,139 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="shell">
-    <aside>
-      <div class="brand"><img src="assets/logo.png" alt=""><span>Madrador</span></div>
-      <nav>
-        <button class="nav active" data-panel="home">⌂ <span>Accueil</span></button>
-        <button class="nav" data-panel="session">▣ <span>Session</span></button>
-        <button class="nav" data-panel="transfer">⇅ <span>Échanges</span></button>
-        <button class="nav" data-panel="settings">⚙ <span>Réglages</span></button>
+  <div class="ambient one"></div><div class="ambient two"></div>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="logo-wrap"><img src="assets/logo.png" alt=""></span><span><b>Madrador</b><small>REMOTE</small></span></div>
+      <nav aria-label="Navigation principale">
+        <button class="nav active" data-panel="home"><span class="nav-icon">⌂</span><span>Tableau de bord</span></button>
+        <button class="nav" data-panel="session"><span class="nav-icon">▣</span><span>Session</span><i id="sessionNavDot"></i></button>
+        <button class="nav" data-panel="history"><span class="nav-icon">◴</span><span>Historique</span></button>
+        <button class="nav" data-panel="transfer"><span class="nav-icon">⇅</span><span>Échanges</span></button>
+        <button class="nav" data-panel="settings"><span class="nav-icon">⚙</span><span>Paramètres</span></button>
       </nav>
-      <div class="connection"><i id="onlineDot"></i><span id="connectionLabel">Connexion…</span></div>
+      <div class="sidebar-footer">
+        <div class="connection"><i id="onlineDot"></i><span><b id="connectionLabel">Connexion…</b><small id="sidebarServer">Serveur local</small></span></div>
+        <button class="profile" aria-label="Informations sur cet appareil"><span id="avatar">PC</span><span><b id="sidebarDevice">Cet ordinateur</b><small id="sidebarVersion">Version —</small></span></button>
+      </div>
     </aside>
 
-    <main>
-      <header>
-        <div><h1 id="pageTitle">Bonjour</h1><p id="deviceLabel">Préparation de votre poste…</p></div>
-        <div id="status" class="status">Prêt</div>
+    <main class="main">
+      <header class="topbar">
+        <div><p class="eyebrow" id="pageEyebrow">ESPACE PERSONNEL</p><h1 id="pageTitle">Tableau de bord</h1><p id="deviceLabel">Préparation de votre poste…</p></div>
+        <div class="top-actions"><button id="availability" class="availability"><i></i><span>Disponible</span></button><button class="icon-button nav" data-panel="settings" aria-label="Ouvrir les paramètres">⚙</button></div>
       </header>
 
       <section id="home" class="panel active">
-        <div class="hero">
-          <div><span class="eyebrow">Assistance à distance</span><h2>Un accès simple.<br><em>Toujours autorisé.</em></h2><p>Partagez votre écran ou aidez un autre ordinateur avec un code temporaire.</p></div>
-          <div class="shield">✓<small>Connexion<br>consentie</small></div>
-        </div>
-        <div class="cards">
-          <article>
-            <span class="card-icon blue">↗</span>
-            <h3>Partager ce PC</h3>
-            <p>Choisissez l’écran visible, créez un code puis acceptez la demande.</p>
-            <button id="chooseSource" class="secondary">Choisir un écran</button>
-            <button id="createSession" class="primary">Créer un code</button>
-            <strong id="localCode" class="code">— — — — — — — — —</strong>
-            <small id="sourceLabel">Aucun écran sélectionné</small>
+        <div class="dashboard-grid">
+          <article class="device-summary glass">
+            <div class="section-heading"><div><span class="overline">CET APPAREIL</span><h2 id="computerName">Ordinateur</h2></div><span class="device-orb">⌁</span></div>
+            <dl class="device-list">
+              <div><dt>État</dt><dd><span class="health-dot"></span><span id="deviceStatus">Prêt à recevoir</span></dd></div>
+              <div><dt>Serveur</dt><dd id="serverDisplay">—</dd></div>
+              <div><dt>Adresse locale</dt><dd id="localIp">—</dd></div>
+              <div><dt>Qualité réseau</dt><dd><span class="signal-bars"><i></i><i></i><i></i><i></i></span><span id="networkQuality">Excellente</span></dd></div>
+              <div><dt>Version</dt><dd id="installedVersion">—</dd></div>
+            </dl>
+            <div class="notice-card"><span>✓</span><p><b>Protection active</b><small>Toute connexion exige votre accord.</small></p></div>
           </article>
-          <article>
-            <span class="card-icon violet">⌁</span>
-            <h3>Contrôler un PC</h3>
-            <p>Entrez le code affiché sur l’ordinateur de la personne à aider.</p>
-            <label for="remoteCode">Code distant</label>
-            <input id="remoteCode" maxlength="11" inputmode="numeric" placeholder="000 000 000">
-            <button id="connect" class="primary">Demander la connexion</button>
+
+          <article class="your-device glass">
+            <div class="section-heading"><div><span class="overline">ACCÈS RAPIDE</span><h2>Votre appareil</h2></div><span id="codeState" class="pill muted">Code non généré</span></div>
+            <p class="muted-text">Partagez ce code temporaire avec une personne de confiance.</p>
+            <div class="code-box"><span id="localCode">— — — — —</span><button id="copyCode" aria-label="Copier le code" disabled>⧉</button></div>
+            <div class="code-meta"><span>Expiration <b id="codeTimer">10:00</b></span><span><i class="health-dot"></i><b id="availabilityText">Disponible</b></span></div>
+            <div class="stack-actions"><button id="chooseSource" class="button secondary">▣ <span id="sourceLabel">Choisir un écran</span></button><button id="createSession" class="button primary">Générer un nouveau code</button></div>
+          </article>
+
+          <article class="connect-device glass">
+            <div class="section-heading"><div><span class="overline">ASSISTANCE</span><h2>Se connecter</h2></div><span class="device-orb violet">↗</span></div>
+            <p class="muted-text">Saisissez l’ID affiché sur l’appareil distant.</p>
+            <label for="remoteCode">ID de connexion</label>
+            <div class="input-wrap"><span>⌁</span><input id="remoteCode" maxlength="11" inputmode="numeric" autocomplete="off" placeholder="000 000 000"></div>
+            <button id="connect" class="button primary wide">Connexion sécurisée <span>→</span></button>
+            <div class="recent-mini"><span>Récents et favoris</span><button id="clearRecents">Effacer</button><div id="recentDevices" class="recent-list"><small>Aucun appareil récent</small></div></div>
           </article>
         </div>
       </section>
 
-      <section id="session" class="panel">
-        <div class="toolbar">
-          <b>Session distante</b>
-          <span id="sessionState">Aucune session</span>
-          <button id="fullscreen" class="secondary">Plein écran</button>
-          <button id="stop" class="danger">Arrêter</button>
+      <section id="session" class="panel session-panel">
+        <div class="session-top glass">
+          <div class="remote-identity"><span class="remote-avatar">PC</span><span><b id="remoteName">Appareil distant</b><small><i></i><span id="sessionState">Aucune session</span></small></span></div>
+          <div class="session-clock"><span id="sessionDuration">00:00:00</span><small>Durée de la session</small></div>
+          <div class="session-quality"><span class="signal-bars"><i></i><i></i><i></i><i></i></span><span><b id="sessionQuality">—</b><small>Connexion</small></span></div>
+          <button id="stop" class="button danger">Déconnexion</button>
         </div>
-        <div class="screen"><video id="remoteVideo" autoplay playsinline tabindex="0"></video><video id="localVideo" autoplay muted playsinline></video><div id="screenEmpty">L’écran distant apparaîtra ici</div></div>
-        <div class="metrics"><span>Débit <b id="bitrate">0 Mb/s</b></span><span>Latence <b id="latency">0 ms</b></span><span>Résolution <b id="resolution">—</b></span></div>
+        <div class="session-workspace">
+          <div id="stage" class="screen">
+            <video id="remoteVideo" autoplay playsinline tabindex="0"></video><video id="localVideo" autoplay muted playsinline></video>
+            <div id="screenEmpty"><span>▣</span><h2>Aucune session active</h2><p>Connectez-vous à un appareil depuis le tableau de bord.</p></div>
+            <div class="floating-tools glass">
+              <button id="fullscreen" title="Plein écran">⛶<small>Plein écran</small></button>
+              <button id="fitScreen" title="Ajuster">⊡<small>Ajuster</small></button>
+              <button id="actualSize" title="Taille réelle">1:1<small>Taille réelle</small></button>
+              <button id="zoomOut" title="Réduire">−<small>Zoom</small></button><b id="zoomLevel">100%</b><button id="zoomIn" title="Agrandir">＋</button>
+              <span class="tool-separator"></span>
+              <button data-session-panel="statsDrawer">⌁<small>Qualité</small></button>
+              <button id="audioToggle">♬<small>Audio</small></button>
+              <button id="controlToggle">⌁<small>Contrôle</small></button>
+              <button data-session-panel="clipboardDrawer">⧉<small>Presse-papiers</small></button>
+              <button data-session-panel="filesDrawer">⇧<small>Fichiers</small></button>
+              <button data-session-panel="chatDrawer">◌<small>Chat</small></button>
+              <button data-session-panel="permissionsDrawer">⚙<small>Permissions</small></button>
+            </div>
+          </div>
+          <aside id="sessionDrawer" class="session-drawer glass" aria-label="Panneau de session">
+            <button id="closeDrawer" class="drawer-close">×</button>
+            <div id="chatDrawer" class="drawer-content"><h2>Discussion</h2><div id="messages" class="messages"></div><div class="compose"><input id="messageInput" placeholder="Votre message"><button id="sendMessage">↑</button></div></div>
+            <div id="filesDrawer" class="drawer-content"><h2>Fichiers</h2><p>Les transferts sont chiffrés pendant la session.</p><label class="drop-zone" for="fileInput">⇧<b>Choisir un fichier</b><small>25 Mo maximum</small></label><input id="fileInput" type="file"><button id="sendFile" class="button primary">Envoyer</button><div id="fileStatus" class="note">Aucun transfert</div></div>
+            <div id="clipboardDrawer" class="drawer-content"><h2>Presse-papiers</h2><textarea id="clipboardText" placeholder="Texte à synchroniser"></textarea><button id="readClipboard" class="button secondary">Lire localement</button><button id="sendClipboard" class="button primary">Synchroniser</button></div>
+            <div id="statsDrawer" class="drawer-content"><h2>Statistiques</h2><div class="stat-grid"><span>Débit<b id="bitrate">0 Mb/s</b></span><span>Latence<b id="latency">0 ms</b></span><span>Résolution<b id="resolution">—</b></span><span>Transport<b id="transport">—</b></span></div></div>
+            <div id="permissionsDrawer" class="drawer-content"><h2>Permissions</h2><p>Modifiez à tout moment ce que le correspondant peut utiliser.</p><div id="permissionMirror"></div></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="history" class="panel">
+        <div class="page-card glass">
+          <div class="page-card-head"><div><span class="overline">ACTIVITÉ</span><h2>Historique des connexions</h2><p>Les informations restent uniquement sur cet ordinateur.</p></div><div class="history-tools"><input id="historySearch" type="search" placeholder="Rechercher un appareil…"><select id="historyFilter"><option value="all">Tous les statuts</option><option value="completed">Terminées</option><option value="failed">Échouées</option></select></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Appareil</th><th>Date</th><th>Durée</th><th>Type</th><th>Statut</th><th></th></tr></thead><tbody id="historyRows"></tbody></table></div>
+          <div id="historyEmpty" class="empty-state"><span>◴</span><h3>Aucune connexion enregistrée</h3><p>Vos sessions récentes apparaîtront ici.</p></div>
+        </div>
       </section>
 
       <section id="transfer" class="panel">
-        <div class="split">
-          <article><h3>Discussion</h3><div id="messages" class="messages"></div><div class="compose"><input id="messageInput" placeholder="Votre message"><button id="sendMessage" class="primary">Envoyer</button></div></article>
-          <article><h3>Documents</h3><p>Chaque fichier est confirmé par le destinataire.</p><input id="fileInput" type="file"><button id="sendFile" class="primary">Proposer le fichier</button><div id="fileStatus" class="note">Aucun fichier sélectionné</div></article>
-          <article><h3>Presse-papiers</h3><p>Partagez uniquement le texte que vous avez choisi.</p><textarea id="clipboardText" placeholder="Texte à partager"></textarea><button id="readClipboard" class="secondary">Lire le presse-papiers</button><button id="sendClipboard" class="primary">Partager le texte</button></article>
-        </div>
+        <div class="page-card glass"><div class="page-card-head"><div><span class="overline">CENTRE D’ÉCHANGES</span><h2>Chat, fichiers et presse-papiers</h2><p>Démarrez une session puis ouvrez le panneau voulu dans la barre flottante.</p></div><button class="button secondary nav" data-panel="session">Ouvrir la session</button></div><div class="feature-cards"><article>◌<h3>Discussion</h3><p>Échangez des messages pendant l’assistance.</p></article><article>⇧<h3>Fichiers</h3><p>Transférez un document après accord.</p></article><article>⧉<h3>Presse-papiers</h3><p>Synchronisez uniquement le texte choisi.</p></article></div></div>
       </section>
 
       <section id="settings" class="panel">
-        <div class="split">
-          <article><h3>Permissions accordées</h3>
-            <label class="toggle"><span>Clavier et souris<small>Autoriser le contrôle de ce PC</small></span><input id="allowControl" type="checkbox"></label>
-            <label class="toggle"><span>Presse-papiers<small>Partager du texte</small></span><input id="allowClipboard" type="checkbox"></label>
-            <label class="toggle"><span>Documents<small>Autoriser les propositions de fichiers</small></span><input id="allowFiles" type="checkbox"></label>
-            <button id="applyPermissions" class="primary">Appliquer</button>
-          </article>
-          <article><h3>Serveur</h3><label for="serverUrl">Adresse de connexion</label><input id="serverUrl" type="url" placeholder="https://remote.example.com"><p class="note">Les deux ordinateurs doivent utiliser la même adresse.</p><button id="saveServer" class="primary">Enregistrer et redémarrer</button></article>
+        <div class="settings-layout glass">
+          <nav class="settings-nav" aria-label="Catégories des paramètres">
+            <span>PARAMÈTRES</span>
+            <button class="setting-tab active" data-setting="general">Général</button><button class="setting-tab" data-setting="connection">Connexion</button><button class="setting-tab" data-setting="security">Sécurité</button><button class="setting-tab" data-setting="display">Affichage</button><button class="setting-tab" data-setting="video">Qualité vidéo</button><button class="setting-tab" data-setting="audio">Audio</button><button class="setting-tab" data-setting="downloads">Téléchargements</button><button class="setting-tab" data-setting="notifications">Notifications</button><button class="setting-tab" data-setting="shortcuts">Raccourcis clavier</button><button class="setting-tab" data-setting="advanced">Avancé</button><button class="setting-tab" data-setting="about">À propos</button>
+          </nav>
+          <div class="settings-content">
+            <section id="setting-general" class="setting-page active"><h2>Général</h2><p>Comportement général de Madrador Remote.</p><label class="toggle-row"><span><b>Démarrer avec Windows</b><small>Ouvrir en arrière-plan à la connexion</small></span><input type="checkbox"></label><label class="toggle-row"><span><b>Rester dans la zone de notification</b><small>Réduire l’application au lieu de la quitter</small></span><input type="checkbox" checked></label></section>
+            <section id="setting-connection" class="setting-page"><h2>Connexion</h2><p>Serveur de signalisation partagé par les deux appareils.</p><label for="serverUrl">Adresse du serveur</label><input id="serverUrl" type="url" placeholder="https://remote.example.com"><p class="note">Les connexions WebRTC restent directes quand le réseau le permet.</p><button id="saveServer" class="button primary">Enregistrer et redémarrer</button></section>
+            <section id="setting-security" class="setting-page"><h2>Sécurité</h2><p>Permissions disponibles pour une session reçue.</p><label class="toggle-row"><span><b>Clavier et souris</b><small>Autoriser le contrôle de ce PC</small></span><input id="allowControl" type="checkbox"></label><label class="toggle-row"><span><b>Presse-papiers</b><small>Autoriser la synchronisation de texte</small></span><input id="allowClipboard" type="checkbox"></label><label class="toggle-row"><span><b>Documents</b><small>Autoriser les propositions de fichiers</small></span><input id="allowFiles" type="checkbox"></label><button id="applyPermissions" class="button primary">Appliquer les permissions</button></section>
+            <section id="setting-display" class="setting-page"><h2>Affichage</h2><p>Personnalisez le confort visuel.</p><label class="toggle-row"><span><b>Animations d’interface</b><small>Respecte le réglage système de mouvement réduit</small></span><input type="checkbox" checked></label><label>Échelle de l’interface<select><option>Automatique</option><option>100 %</option><option>125 %</option></select></label></section>
+            <section id="setting-video" class="setting-page"><h2>Qualité vidéo</h2><p>Ajustez l’équilibre entre netteté et débit.</p><label>Profil<select><option>Automatique (recommandé)</option><option>Qualité élevée</option><option>Équilibré</option><option>Économie de données</option></select></label></section>
+            <section id="setting-audio" class="setting-page"><h2>Audio</h2><p>Le partage audio est désactivé par défaut.</p><label class="toggle-row"><span><b>Son de l’ordinateur</b><small>Partager le son pendant une session</small></span><input type="checkbox"></label></section>
+            <section id="setting-downloads" class="setting-page"><h2>Téléchargements</h2><p>Choisissez où enregistrer les fichiers reçus.</p><label>Dossier de destination<input value="Demander à chaque fois" readonly></label></section>
+            <section id="setting-notifications" class="setting-page"><h2>Notifications</h2><p>Choisissez les alertes affichées par Windows.</p><label class="toggle-row"><span><b>Demandes de connexion</b><small>Afficher une notification système</small></span><input type="checkbox" checked></label><label class="toggle-row"><span><b>Transferts terminés</b><small>Prévenir quand un fichier est reçu</small></span><input type="checkbox" checked></label></section>
+            <section id="setting-shortcuts" class="setting-page"><h2>Raccourcis clavier</h2><div class="shortcut"><span>Quitter le plein écran</span><kbd>Échap</kbd></div><div class="shortcut"><span>Ouvrir le chat</span><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></div></section>
+            <section id="setting-advanced" class="setting-page"><h2>Avancé</h2><p>Options réseau réservées au diagnostic.</p><label class="toggle-row"><span><b>Journal de diagnostic</b><small>Conserver les erreurs techniques localement</small></span><input type="checkbox"></label></section>
+            <section id="setting-about" class="setting-page"><h2>À propos</h2><div class="about-brand"><img src="assets/logo.png" alt=""><div><b>Madrador Remote</b><span id="aboutVersion">Version —</span></div></div><div class="update-card"><div><b id="updateTitle">Mises à jour</b><small id="updateDescription">Vérifiez si une nouvelle version est disponible.</small></div><button id="updateButton" class="button secondary">Vérifier</button><progress id="updateProgress" max="100" value="0" hidden></progress><div id="releaseNotes"></div></div></section>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
-  <dialog id="sourceDialog"><form method="dialog"><header><h3>Choisir ce qui sera visible</h3><button value="cancel">×</button></header><div id="sourceGrid" class="source-grid"></div></form></dialog>
-  <dialog id="requestDialog"><div class="request"><span class="card-icon violet">⌁</span><h3>Demande de connexion</h3><p id="requester">Un ordinateur souhaite se connecter.</p><div class="dialog-actions"><button id="deny" class="secondary">Refuser</button><button id="accept" class="primary">Accepter</button></div></div></dialog>
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+  <dialog id="sourceDialog"><form method="dialog"><header><div><span class="overline">SOURCE VIDÉO</span><h2>Choisir ce qui sera visible</h2></div><button value="cancel" aria-label="Fermer">×</button></header><div id="sourceGrid" class="source-grid"></div></form></dialog>
+  <dialog id="requestDialog"><div class="request"><span class="request-icon">⌁</span><span class="overline">CONNEXION ENTRANTE</span><h2>Autoriser cet appareil ?</h2><p id="requester">Un ordinateur souhaite se connecter.</p><div class="request-permissions"><span>▣ Écran</span><span>⌁ Contrôle selon vos permissions</span></div><div class="dialog-actions"><button id="deny" class="button secondary">Refuser</button><button id="accept" class="button primary">Accepter la connexion</button></div></div></dialog>
+  <dialog id="fileDialog"><div class="request"><span class="request-icon">⇧</span><span class="overline">FICHIER ENTRANT</span><h2>Accepter le transfert ?</h2><p id="fileOfferText"></p><div class="dialog-actions"><button id="rejectFile" class="button secondary">Refuser</button><button id="acceptFile" class="button primary">Accepter</button></div></div></dialog>
 
   <script src="vendor/socket.io.min.js"></script>
   <script type="module" src="app.js"></script>

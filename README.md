@@ -51,6 +51,26 @@ Le navigateur ne peut pas devenir un agent Windows permanent et certains raccour
 - permissions séparées pour chaque session ;
 - arrêt immédiat depuis les deux ordinateurs.
 
+## Expérience Windows
+
+L’application Electron propose une interface complète conçue pour rester lisible pendant une assistance :
+
+- tableau de bord avec état du poste, serveur, IP locale, qualité réseau et version ;
+- carte « Votre appareil » avec copie du code, expiration et disponibilité ;
+- appareils récents, historique local consultable et reconnexion rapide ;
+- espace de session centré sur la vidéo avec zoom, plein écran et statistiques ;
+- panneaux latéraux pour le chat, les fichiers, le presse-papiers et les permissions ;
+- paramètres organisés par catégories, interface de mise à jour et notifications non bloquantes ;
+- splash screen et menu dans la zone de notification Windows.
+
+Le menu de la zone de notification permet de rouvrir l’application, copier l’ID actif, changer la disponibilité, arrêter les connexions et quitter. Fermer la fenêtre réduit l’application dans cette zone ; utilisez **Quitter** pour arrêter complètement Madrador Remote.
+
+L’interface respecte `prefers-reduced-motion`. Les statistiques WebRTC sont relevées à intervalle limité afin d’éviter une charge inutile pendant la vidéo.
+
+## États du viewer web
+
+La page `/remote` affiche séparément la saisie du code, l’attente d’autorisation, la négociation WebRTC, les erreurs récupérables et la session active. Pendant une session, la vidéo occupe l’espace principal et les outils moins fréquents sont regroupés dans des panneaux latéraux. Le viewer web utilise le même serveur Socket.IO et la même connexion WebRTC que l’application Windows.
+
 ## Expérimental ou planifié
 
 - reconnexion avancée et jetons de reprise ;
