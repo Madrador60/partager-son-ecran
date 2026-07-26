@@ -12,6 +12,8 @@ const state = {
   pendingViewer: null,
   selectedBounds: null,
   candidateQueue: [],
+  channels: {},
+  incomingFile: null,
   statsTimer: null,
   permissions: { control: false, clipboard: false, files: false }
 };
@@ -61,6 +63,7 @@ async function createPeer(isHost) {
   const iceServers = await bridge.getIceServers();
   const peer = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
   state.peer = peer;
+  state.channels = {};
   state.candidateQueue = [];
 
   peer.onicecandidate = ({ candidate }) => {
@@ -81,6 +84,34 @@ async function createPeer(isHost) {
       $("screenEmpty").hidden = true;
       $("remoteVideo").focus();
     };
+  }
+  const bindChannel = (channel) => {
+    state.channels[channel.label] = channel;
+    channel.onmessage = async ({ data }) => {
+      if (channel.label === "input-fast" || channel.label === "commands") {
+        try { await bridge.sendRemoteInput(JSON.parse(data)); } catch (error) { status(`Commande refusée : ${error.message}`); }
+      } else if (channel.label === "file-transfer") {
+        if (typeof data === "string") {
+          const message = JSON.parse(data);
+          if (message.type === "start") state.incomingFile = { name: message.name, size: message.size, chunks: [], received: 0 };
+          if (message.type === "end" && state.incomingFile) {
+            const blob = new Blob(state.incomingFile.chunks);
+            await bridge.saveReceivedFile({ name: state.incomingFile.name, data: await blob.arrayBuffer() });
+            state.incomingFile = null;
+          }
+        } else if (state.incomingFile) {
+          state.incomingFile.chunks.push(data);
+          state.incomingFile.received += data.byteLength;
+          $("fileStatus").textContent = `${Math.round(state.incomingFile.received / state.incomingFile.size * 100)} % reçus`;
+        }
+      }
+    };
+  };
+  peer.ondatachannel = ({ channel }) => bindChannel(channel);
+  if (isHost) {
+    bindChannel(peer.createDataChannel("input-fast", { ordered: false, maxRetransmits: 0 }));
+    bindChannel(peer.createDataChannel("commands", { ordered: true }));
+    bindChannel(peer.createDataChannel("file-transfer", { ordered: true }));
   }
   return peer;
 }
@@ -206,6 +237,8 @@ async function stopSession(notify = true) {
   state.peer?.close();
   await bridge.setControlEnabled({ enabled: false, bounds: null });
   Object.assign(state, { peer: null, stream: null, remoteCode: null, selectedBounds: null, candidateQueue: [] });
+  state.channels = {};
+  state.incomingFile = null;
   $("remoteVideo").srcObject = null;
   $("localVideo").srcObject = null;
   $("screenEmpty").hidden = false;

@@ -6,6 +6,10 @@ const checks = [
   ["main.js", /sandbox:\s*true/, "sandbox Electron"],
   ["public/index.html", /Content-Security-Policy/, "politique de contenu"],
   ["server/index.js", /X-Content-Type-Options/, "en-têtes HTTP"],
+  ["server/index.js", /helmet\(/, "Helmet"],
+  ["server/index.js", /PUBLIC_ORIGIN est obligatoire/, "origine obligatoire en production"],
+  ["main.js", /assertTrusted/, "origine IPC"],
+  ["main.js", /RemoteInput\.parse/, "validation IPC"],
   ["server/index.js", /sessionFor\(socket,\s*code\)/, "appartenance aux sessions"],
   ["server/index.js", /permissions\.control/, "permission de contrôle"],
   ["server/index.js", /MAX_FILE_BYTES/, "limite des fichiers"]

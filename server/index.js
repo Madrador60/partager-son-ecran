@@ -4,11 +4,19 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const path = require("node:path");
 const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
+const { z } = require("zod");
 const { Server } = require("socket.io");
+const { SessionCode, Permissions } = require("../src/shared/validation");
+const releases = require("../src/services/github-releases");
 
 const SESSION_TTL = 10 * 60_000;
 const MAX_FILE_BYTES = Math.max(1, Number(process.env.MAX_FILE_MB || 25)) * 1024 * 1024;
-const allowedOrigins = process.env.PUBLIC_ORIGIN?.split(",").map((value) => value.trim()).filter(Boolean) || true;
+const configuredOrigins = process.env.PUBLIC_ORIGIN?.split(",").map((value) => value.trim()).filter(Boolean) || [];
+if (process.env.NODE_ENV === "production" && configuredOrigins.length === 0) {
+  throw new Error("PUBLIC_ORIGIN est obligatoire en production");
+}
+const allowedOrigins = configuredOrigins.length ? configuredOrigins : ["http://127.0.0.1:3000", "http://localhost:3000"];
 const sessions = new Map();
 const socketSession = new Map();
 
@@ -41,6 +49,16 @@ function peerOf(socket, session) {
 
 const app = express();
 app.disable("x-powered-by");
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:"],
+      styleSrc: ["'self'"],
+      scriptSrc: ["'self'"]
+    }
+  }
+}));
 app.use((_req, res, next) => {
   res.set({ "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Permissions-Policy": "camera=(), microphone=(), geolocation=()", "Cross-Origin-Resource-Policy": "same-site" });
   next();
@@ -48,7 +66,31 @@ app.use((_req, res, next) => {
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: "draft-7", legacyHeaders: false }));
 app.use(express.static(path.join(__dirname, "..", "website")));
 app.get("/logo.png", (_req, res) => res.sendFile(path.join(__dirname, "..", "assets", "logo.png")));
+app.get("/remote", (_req, res) => res.sendFile(path.join(__dirname, "..", "website", "remote.html")));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "madrador-signal" }));
+app.get("/api/ice", (_req, res) => {
+  const iceServers = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
+  res.json({ iceServers });
+});
+app.get("/api/releases/latest", async (_req, res, next) => {
+  try {
+    const release = await releases.latest("stable");
+    res.json({ ...release, directUrl: undefined, downloadUrl: "/api/download/latest/windows" });
+  } catch (error) { next(error); }
+});
+app.get("/api/download/:channel/windows", async (req, res) => {
+  try {
+    const channel = req.params.channel === "beta" ? "beta" : "stable";
+    const release = await releases.latest(channel);
+    res.redirect(302, release.directUrl);
+  } catch {
+    res.redirect(302, "/download-error.html");
+  }
+});
+app.use((error, _req, res, _next) => {
+  console.error(JSON.stringify({ level: "error", code: error.message, at: new Date().toISOString() }));
+  res.status(503).json({ error: "RELEASE_UNAVAILABLE", message: "La dernière version est momentanément indisponible." });
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -62,6 +104,8 @@ io.on("connection", (socket) => {
   socket.data.lastInput = 0;
 
   socket.on("host-create", ({ deviceName, permissions: allowed } = {}) => {
+    const parsed = z.object({ deviceName: z.string().max(80).optional(), permissions: Permissions.optional() }).safeParse({ deviceName, permissions: allowed });
+    if (!parsed.success) return socket.emit("protocol-error", { code: "INVALID_HOST_CREATE" });
     const previous = socketSession.get(socket.id);
     if (previous) sessions.delete(previous);
     const sessionCode = code();
@@ -72,7 +116,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("viewer-request", ({ code: requestedCode, deviceName } = {}) => {
-    const sessionCode = String(requestedCode || "");
+    const parsedCode = SessionCode.safeParse(String(requestedCode || ""));
+    if (!parsedCode.success) return socket.emit("viewer-denied", { reason: "Code invalide." });
+    const sessionCode = parsedCode.data;
     const session = sessions.get(sessionCode);
     if (!session || session.expiresAt < Date.now() || session.viewer) return socket.emit("viewer-denied", { reason: "Code invalide, expiré ou déjà utilisé." });
     session.pending.add(socket.id);

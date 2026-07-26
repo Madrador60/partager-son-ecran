@@ -27,6 +27,9 @@ jobs:
         run: npm run verify
       - name: Build
         run: npm run dist
+      - name: Generate checksum
+        shell: powershell
+        run: Get-ChildItem dist/*.exe | ForEach-Object { $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash; "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" }
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -35,6 +38,7 @@ jobs:
             dist/*.exe
             dist/*.yml
             dist/*.blockmap
+            dist/*.sha256
       - name: Upload Assets
         uses: actions/upload-artifact@v4
         with:
@@ -43,3 +47,4 @@ jobs:
             dist/*.exe
             dist/*.yml
             dist/*.blockmap
+            dist/*.sha256

@@ -3,6 +3,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { io: connect } = require("socket.io-client");
+const { SessionCode, ControlConfig, RemoteInput } = require("../src/shared/validation");
+const { normalize } = require("../src/services/github-releases");
 
 const root = path.join(__dirname, "..");
 
@@ -34,6 +36,21 @@ async function run() {
   assert.match(html, /vendor\/socket\.io\.min\.js/);
   assert.ok(fs.existsSync(path.join(root, "public", "vendor", "socket.io.min.js")));
   assert.ok(require("../package.json").build.files.includes("preload.js"));
+  assert.equal(SessionCode.safeParse("123456789").success, true);
+  assert.equal(SessionCode.safeParse("123").success, false);
+  assert.equal(ControlConfig.safeParse({ enabled: true, bounds: { x: -1920, y: 0, width: 1920, height: 1080 } }).success, true);
+  assert.equal(RemoteInput.safeParse({ type: "mousemove", x: 2, y: 0 }).success, false);
+  const normalizedRelease = normalize({
+    tag_name: "v6.1.0", draft: false, prerelease: false, published_at: "2026-01-01T00:00:00Z",
+    assets: [
+      { name: "Source.zip", browser_download_url: "https://github.com/example/source.zip", size: 1 },
+      { name: "Madrador-Remote-Setup-6.1.0.exe", browser_download_url: "https://github.com/example/setup.exe", size: 42 }
+    ]
+  });
+  assert.equal(normalizedRelease.version, "6.1.0");
+  assert.equal(normalizedRelease.fileName, "Madrador-Remote-Setup-6.1.0.exe");
+  assert.throws(() => normalize({ draft: true, assets: [] }), /RELEASE_INVALID/);
+  assert.throws(() => normalize({ draft: false, assets: [] }), /INSTALLER_NOT_FOUND/);
 
   process.env.PORT = "0";
   process.env.HOST = "127.0.0.1";
@@ -48,6 +65,8 @@ async function run() {
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
   assert.equal((await fetch(`${url}/site.css`)).status, 200);
+  assert.equal((await fetch(`${url}/remote`)).status, 200);
+  assert.equal((await fetch(`${url}/remote.js`)).status, 200);
 
   const host = connect(url, { transports: ["websocket"], forceNew: true });
   const viewer = connect(url, { transports: ["websocket"], forceNew: true });

@@ -4,9 +4,18 @@ const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const os = require("node:os");
+const { pathToFileURL } = require("node:url");
+const { z } = require("zod");
+const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
 
 let window;
 let remoteControl = { enabled: false, bounds: null };
+
+function assertTrusted(event) {
+  const url = event.senderFrame?.url || "";
+  const expected = pathToFileURL(path.join(__dirname, "public", "index.html")).href;
+  if (url !== expected) throw new Error("IPC_ORIGIN_DENIED");
+}
 
 function createWindow() {
   Menu.setApplicationMenu(null);
@@ -65,12 +74,16 @@ ipcMain.handle("list-sources", async () => {
   }));
 });
 
-ipcMain.handle("set-control-enabled", (_event, value = {}) => {
+ipcMain.handle("set-control-enabled", (event, value = {}) => {
+  assertTrusted(event);
+  value = ControlConfig.parse(value);
   remoteControl = { enabled: Boolean(value.enabled), bounds: value.bounds || null };
   return { ok: true };
 });
 
-ipcMain.handle("remote-input", async (_event, payload = {}) => {
+ipcMain.handle("remote-input", async (event, payload = {}) => {
+  assertTrusted(event);
+  payload = RemoteInput.parse(payload);
   if (!remoteControl.enabled) return { ok: false, error: "Contrôle non autorisé" };
   const { mouse, keyboard, Button, Key, Point } = require("@nut-tree-fork/nut-js");
   const bounds = remoteControl.bounds || screen.getPrimaryDisplay().bounds;
@@ -91,11 +104,14 @@ ipcMain.handle("remote-input", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("clipboard-read", () => clipboard.readText());
-ipcMain.handle("clipboard-write", (_event, text) => {
-  clipboard.writeText(String(text || "").slice(0, 100_000));
+ipcMain.handle("clipboard-write", (event, text) => {
+  assertTrusted(event);
+  clipboard.writeText(z.string().max(100_000).parse(text));
   return { ok: true };
 });
-ipcMain.handle("save-file", async (_event, file = {}) => {
+ipcMain.handle("save-file", async (event, file = {}) => {
+  assertTrusted(event);
+  file = SaveFile.parse(file);
   const result = await dialog.showSaveDialog(window, { defaultPath: path.basename(String(file.name || "document")) });
   if (result.canceled || !result.filePath) return { ok: false };
   const data = Buffer.from(file.data);

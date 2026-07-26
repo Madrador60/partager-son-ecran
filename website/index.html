@@ -16,7 +16,8 @@
     <nav aria-label="Navigation principale">
       <a href="#fonctionnement">Fonctionnement</a>
       <a href="#securite">Sécurité</a>
-      <a class="nav-cta" href="https://github.com/Madrador60/partager-son-ecran/releases/latest">Télécharger</a>
+      <a href="/remote">Connexion web</a>
+      <a id="navDownload" class="nav-cta" href="/api/download/latest/windows">Télécharger</a>
     </nav>
   </header>
 
@@ -27,10 +28,11 @@
         <h1>Aidez un écran distant, <em>en toute confiance.</em></h1>
         <p class="lead">Partage d’écran, contrôle clavier-souris, discussion et transfert de fichiers. Chaque connexion reste visible et doit être acceptée.</p>
         <div class="actions">
-          <a class="button primary" href="https://github.com/Madrador60/partager-son-ecran/releases/latest">Télécharger pour Windows</a>
-          <a class="button secondary" href="#fonctionnement">Voir comment ça marche</a>
+          <a id="downloadButton" class="button primary" href="/api/download/latest/windows">Télécharger pour Windows</a>
+          <a class="button secondary" href="/remote">Se connecter depuis le web</a>
         </div>
-        <p class="fine-print">Windows 10/11 · Gratuit · Aucun compte requis</p>
+        <p id="releaseInfo" class="fine-print">Recherche de la dernière version…</p>
+        <a id="releaseFallback" class="fine-print" href="https://github.com/Madrador60/partager-son-ecran/releases" hidden>Voir toutes les versions</a>
       </div>
       <div class="product-card" aria-label="Aperçu d'une connexion Madrador Remote">
         <div class="window-bar"><i></i><i></i><i></i><span>Madrador Remote</span></div>

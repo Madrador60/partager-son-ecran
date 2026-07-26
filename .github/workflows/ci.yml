@@ -20,3 +20,13 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+      - run: npm run build
+      - name: Checksum
+        shell: powershell
+        run: Get-FileHash dist/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Madrador-Remote-Windows
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
