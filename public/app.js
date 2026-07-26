@@ -1,681 +1,332 @@
+const bridge = window.remoteAssist;
 const $ = (id) => document.getElementById(id);
-const Perf = window.RAPerf;
-const SIGNALING_KEY = "madrador-signaling-url";
-const defaultSignalingUrl = window.location.origin;
-let signalingUrl = localStorage.getItem(SIGNALING_KEY) || defaultSignalingUrl;
-const socketOptions = { transports: ["websocket", "polling"], reconnection: true, reconnectionAttempts: 10, timeout: 12000 };
-let host = io(signalingUrl, socketOptions);
+const SERVER_KEY = "madrador.server";
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
-let viewer = null;
-let code = null;
-let viewerCode = null;
-let stream = null;
-let hostPeer = null;
-let viewerPeer = null;
-let pendingViewer = null;
-let statsTimer = null;
-let pendingFile = null;
-let outgoingFile = null;
-let deviceName = "PC";
-let clipboardPayload = { text: "", image: null };
-let permissions = { control:false, clipboard:false, files:false, audio:false };
+const state = {
+  socket: null,
+  peer: null,
+  stream: null,
+  sessionCode: null,
+  remoteCode: null,
+  pendingViewer: null,
+  selectedBounds: null,
+  candidateQueue: [],
+  statsTimer: null,
+  permissions: { control: false, clipboard: false, files: false }
+};
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+function status(message) {
+  $("status").textContent = message;
 }
 
-function setSocketStatus(socket) {
-  socket.on("connect", () => setStatus(`Serveur connecté • ${signalingUrl}`));
-  socket.on("connect_error", () => setStatus("Serveur de connexion inaccessible"));
-  socket.on("disconnect", (reason) => setStatus(`Serveur déconnecté • ${reason}`));
-}
-setSocketStatus(host);
-
-function setStatus(text) {
-  $("status").textContent = text;
+function showPanel(id) {
+  document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === id));
+  document.querySelectorAll(".nav").forEach((button) => button.classList.toggle("active", button.dataset.panel === id));
+  $("pageTitle").textContent = { home: "Bonjour", session: "Session", transfer: "Échanges", settings: "Réglages" }[id];
 }
 
 function formatCode(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ");
 }
 
-function showView(id) {
-  document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === id));
-  document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
-}
-
-document.querySelectorAll(".tab").forEach((button) => {
-  button.addEventListener("click", () => showView(button.dataset.view));
-});
-
-document.querySelectorAll("[data-view-jump]").forEach((button) => {
-  button.addEventListener("click", () => showView(button.dataset.viewJump));
-});
-
-function getHistory() {
-  return JSON.parse(localStorage.getItem("madrador-history") || "[]");
-}
-
-function saveHistory(type, detail) {
-  const history = getHistory();
-  history.unshift({ type, detail, at: new Date().toISOString() });
-  localStorage.setItem("madrador-history", JSON.stringify(history.slice(0, 50)));
-  renderHistory();
-}
-
-function renderHistory() {
-  const history = getHistory();
-  $("historyList").innerHTML = history.length
-    ? history.map((item) => `
-      <div class="history-item">
-        <b>${escapeHtml(item.type)}</b>
-        <div>${escapeHtml(item.detail)}</div>
-        <small>${new Date(item.at).toLocaleString()}</small>
-      </div>`).join("")
-    : "<p>Aucune connexion enregistrée.</p>";
-
-  $("recentCards").innerHTML = history.length
-    ? history.slice(0, 6).map((item) => `
-      <div class="recent-card">
-        <b>${escapeHtml(item.type)}</b>
-        <span>${escapeHtml(item.detail)}</span>
-        <small>${new Date(item.at).toLocaleString()}</small>
-      </div>`).join("")
-    : `<div class="recent-card"><b>Aucune connexion</b><small>Vos sessions apparaîtront ici.</small></div>`;
-}
-
-window.remoteAssist.systemInfo().then((info) => {
-  deviceName = info.hostname;
-  $("deviceInfo").textContent = `${info.hostname} • ${info.displays} écran(s) • ${info.memoryGb} Go RAM`;
-});
-
-renderHistory();
-
-$("remoteCode").addEventListener("input", (event) => {
-  event.target.value = formatCode(event.target.value);
-});
-
-$("createCode").onclick = () => {
-  host.emit("host-create", { deviceName, permissions });
-  setStatus("Création du code…");
-};
-
-host.on("host-created", ({ code: newCode }) => {
-  code = newCode;
-  $("hostCode").textContent = formatCode(code);
-  setStatus("Code prêt");
-  saveHistory("Code créé", formatCode(code));
-});
-
-host.on("session-expired", () => {
-  code = null;
-  $("hostCode").textContent = "Code expiré";
-  setStatus("Code expiré");
-});
-
-$("chooseScreen").onclick = async () => {
-  const sources = await window.remoteAssist.listSources();
-  $("sourceGrid").innerHTML = "";
-  $("picker").classList.remove("hidden");
-
-  for (const source of sources) {
-    const button = document.createElement("button");
-    button.className = "source";
-    button.innerHTML = `<img src="${source.thumbnail}" alt=""><b>${escapeHtml(source.name)}</b>`;
-    button.onclick = async () => {
-      const profile = Perf.profiles[$("profile").value];
-      stream?.getTracks().forEach((track) => track.stop());
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: permissions.audio,
-          video: {
-            mandatory: {
-              chromeMediaSource: "desktop",
-              chromeMediaSourceId: source.id,
-              maxWidth: profile.width,
-              maxHeight: profile.height,
-              maxFrameRate: profile.fps
-            }
-          }
-        });
-
-        $("localVideo").srcObject = stream;
-        $("selectedSource").textContent = source.name;
-        $("picker").classList.add("hidden");
-        setStatus("Écran prêt");
-      } catch (error) {
-        setStatus(`Capture impossible : ${error.message}`);
-      }
-    };
-    $("sourceGrid").appendChild(button);
-  }
-};
-
-$("closePicker").onclick = () => $("picker").classList.add("hidden");
-
-host.on("incoming-request", ({ viewerSocketId, deviceName: requesterName }) => {
-  pendingViewer = viewerSocketId;
-  $("requester").textContent = `${requesterName || "Un ordinateur"} veut se connecter`;
-  $("incoming").classList.remove("hidden");
-  setStatus("Demande reçue");
-});
-
-$("deny").onclick = () => {
-  $("incoming").classList.add("hidden");
-  host.emit("host-decision", { viewerSocketId: pendingViewer, approved: false });
-  setStatus("Connexion refusée");
-};
-
-$("accept").onclick = () => {
-  if (!stream) {
-    setStatus("Choisissez d’abord un écran");
-    return;
-  }
-
-  permissions = {
-    control: $("acceptControl").checked,
-    clipboard: $("acceptClipboard").checked,
-    files: $("acceptFiles").checked,
-    audio: $("acceptAudio").checked
-  };
-
-  $("incoming").classList.add("hidden");
-  host.emit("host-decision", {
-    viewerSocketId: pendingViewer,
-    approved: true,
-    permissions
-  });
-
-  window.remoteAssist.setControlEnabled(permissions.control);
-  saveHistory("Connexion acceptée", `Contrôle ${permissions.control ? "autorisé" : "refusé"} • documents ${permissions.files ? "autorisés" : "refusés"}`);
-  setStatus("Connexion acceptée");
-};
-
-function createPeer(socket, sessionCode, isHost) {
-  const peer = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    bundlePolicy: "max-bundle",
-    rtcpMuxPolicy: "require"
-  });
-
-  peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("signal", { code: sessionCode, data: { type:"candidate", candidate:event.candidate } });
-    }
-  };
-
-  peer.onconnectionstatechange = () => {
-    setStatus(peer.connectionState);
-    if (peer.connectionState === "connected") {
-      showView("session");
-      startStats(peer);
-      saveHistory("Connexion établie", formatCode(sessionCode));
-    }
-  };
-
-  if (!isHost) {
-    peer.ontrack = (event) => {
-      $("remoteVideo").srcObject = event.streams[0];
-      $("remoteVideo").focus();
-    };
-  }
-
-  return peer;
-}
-
-host.on("viewer-ready", async () => {
-  hostPeer = createPeer(host, code, true);
-  stream.getTracks().forEach((track) => hostPeer.addTrack(track, stream));
-  await Perf.apply(hostPeer, Perf.profiles[$("profile").value]);
-
-  const offer = await hostPeer.createOffer();
-  await hostPeer.setLocalDescription(offer);
-  host.emit("signal", { code, data: { type:"offer", sdp:hostPeer.localDescription } });
-});
-
-host.on("signal", async ({ data }) => {
-  if (!hostPeer) return;
-  if (data.type === "answer") await hostPeer.setRemoteDescription(data.sdp);
-  if (data.type === "candidate") {
-    try { await hostPeer.addIceCandidate(data.candidate); } catch {}
-  }
-});
-
-host.on("remote-input", (payload) => window.remoteAssist.sendRemoteInput(payload));
-host.on("viewer-left", () => setStatus("Le correspondant a quitté la session"));
-
-$("connect").onclick = () => {
-  viewerCode = $("remoteCode").value.replace(/\D/g, "");
-  if (viewerCode.length !== 9) {
-    setStatus("Code invalide");
-    return;
-  }
-
-  viewer?.disconnect();
-  viewer = io(signalingUrl, socketOptions);
-  setSocketStatus(viewer);
-  viewer.emit("viewer-request", { code: viewerCode, deviceName });
-  setStatus("Demande envoyée");
-
-  viewer.on("viewer-denied", ({ reason }) => setStatus(reason));
-
-  viewer.on("viewer-approved", ({ code: approvedCode, permissions: allowed }) => {
-    permissions = allowed;
-    viewerPeer = createPeer(viewer, approvedCode, false);
-    saveHistory("Demande acceptée", formatCode(viewerCode));
-    setStatus("Accepté, connexion en cours…");
-  });
-
-  viewer.on("signal", async ({ data }) => {
-    if (!viewerPeer) return;
-
-    if (data.type === "offer") {
-      await viewerPeer.setRemoteDescription(data.sdp);
-      const answer = await viewerPeer.createAnswer();
-      await viewerPeer.setLocalDescription(answer);
-      viewer.emit("signal", { code:viewerCode, data:{ type:"answer", sdp:viewerPeer.localDescription } });
-    }
-
-    if (data.type === "candidate") {
-      try { await viewerPeer.addIceCandidate(data.candidate); } catch {}
-    }
-  });
-
-  viewer.on("permissions-state", (allowed) => permissions = allowed);
-  viewer.on("session-ended", stopAll);
-  bindRelay(viewer);
-};
-
-function activeSocket() {
-  return viewer || host;
-}
-
-function addMessage(text, mine) {
+function addMessage(text, mine = false) {
   const bubble = document.createElement("div");
-  bubble.className = `bubble ${mine ? "me" : ""}`;
-  bubble.textContent = text;
+  bubble.className = `bubble${mine ? " mine" : ""}`;
+  bubble.textContent = String(text).slice(0, 2000);
   $("messages").appendChild(bubble);
   $("messages").scrollTop = $("messages").scrollHeight;
 }
 
-function bindRelay(socket) {
-  socket.on("chat-message", ({ text }) => addMessage(text, false));
-
-  socket.on("clipboard-share", async (payload = {}) => {
-    if (!permissions.clipboard) return;
-    await window.remoteAssist.clipboardWrite(payload);
-    addMessage(payload.image ? "Image copiée reçue dans le presse-papiers." : "Texte copié reçu.", false);
-    $("clipboardStatus").textContent = "Presse-papiers distant appliqué.";
-  });
-
-  socket.on("file-offer", (file) => {
-    pendingFile = file;
-    $("fileOfferText").textContent = `${file.name} • ${(file.size / 1048576).toFixed(1)} Mo`;
-    $("fileOffer").classList.remove("hidden");
-  });
-
-  socket.on("file-decision", ({ id, accepted }) => {
-    if (!outgoingFile || outgoingFile.id !== id) return;
-    if (!accepted) {
-      $("fileStatus").textContent = "Le document a été refusé.";
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      socket.emit("file-data", {
-        id,
-        name: outgoingFile.file.name,
-        size: outgoingFile.file.size,
-        data: Array.from(new Uint8Array(reader.result))
-      });
-      $("fileStatus").textContent = "Document envoyé.";
-      saveHistory("Document envoyé", outgoingFile.file.name);
-    };
-    reader.readAsArrayBuffer(outgoingFile.file);
-    $("fileStatus").textContent = "Envoi en cours…";
-  });
-
-  socket.on("file-data", async (payload) => {
-    const result = await window.remoteAssist.saveReceivedFile({
-      name: payload.name,
-      data: payload.data
-    });
-
-    $("fileStatus").textContent = result.ok
-      ? `Document enregistré : ${result.path}`
-      : "Enregistrement annulé.";
-
-    if (result.ok) saveHistory("Document reçu", payload.name);
-  });
+function activeCode() {
+  return state.remoteCode || state.sessionCode;
 }
 
-bindRelay(host);
-
-$("sendChat").onclick = () => {
-  const text = $("chatInput").value.trim();
-  if (!text) return;
-  activeSocket().emit("chat-message", { text });
-  addMessage(text, true);
-  $("chatInput").value = "";
-};
-
-$("readClipboard").onclick = async () => {
-  clipboardPayload = await window.remoteAssist.clipboardRead();
-  $("clipboardText").value = clipboardPayload.text || "";
-
-  if (clipboardPayload.image) {
-    $("clipboardPreview").innerHTML = `<img src="${clipboardPayload.image}" alt="Image copiée">`;
-  } else {
-    $("clipboardPreview").textContent = "Aucune image copiée";
-  }
-
-  $("clipboardStatus").textContent = "Presse-papiers local chargé.";
-};
-
-$("shareClipboard").onclick = () => {
-  if (!permissions.clipboard) {
-    $("clipboardStatus").textContent = "Le presse-papiers n’est pas autorisé pour cette session.";
-    return;
-  }
-
-  const payload = clipboardPayload.image
-    ? { image: clipboardPayload.image }
-    : { text: $("clipboardText").value };
-
-  activeSocket().emit("clipboard-share", payload);
-  $("clipboardStatus").textContent = payload.image ? "Image partagée." : "Texte partagé.";
-};
-
-function selectFile(file) {
-  if (!file) return;
-  const transfer = new DataTransfer();
-  transfer.items.add(file);
-  $("fileInput").files = transfer.files;
-  $("fileStatus").textContent = `${file.name} • ${(file.size / 1048576).toFixed(1)} Mo`;
-}
-
-$("dropZone").addEventListener("dragover", (event) => {
-  event.preventDefault();
-  $("dropZone").classList.add("drag");
-});
-
-$("dropZone").addEventListener("dragleave", () => $("dropZone").classList.remove("drag"));
-
-$("dropZone").addEventListener("drop", (event) => {
-  event.preventDefault();
-  $("dropZone").classList.remove("drag");
-  selectFile(event.dataTransfer.files[0]);
-});
-
-$("sendFile").onclick = () => {
-  const file = $("fileInput").files[0];
-  if (!file) {
-    $("fileStatus").textContent = "Choisissez d’abord un document.";
-    return;
-  }
-  if (file.size > 25 * 1024 * 1024) {
-    $("fileStatus").textContent = "La taille maximale est de 25 Mo.";
-    return;
-  }
-  if (!permissions.files) {
-    $("fileStatus").textContent = "Le transfert de documents n’est pas autorisé.";
-    return;
-  }
-
-  outgoingFile = { id:crypto.randomUUID(), file };
-  activeSocket().emit("file-offer", {
-    id:outgoingFile.id,
-    name:file.name,
-    type:file.type,
-    size:file.size
-  });
-  $("fileStatus").textContent = "Demande d’acceptation envoyée…";
-};
-
-$("acceptFile").onclick = () => {
-  $("fileOffer").classList.add("hidden");
-  activeSocket().emit("file-decision", { id:pendingFile.id, accepted:true });
-};
-
-$("declineFile").onclick = () => {
-  $("fileOffer").classList.add("hidden");
-  activeSocket().emit("file-decision", { id:pendingFile.id, accepted:false });
-};
-
-$("applyPermissions").onclick = () => {
-  permissions = {
-    control:$("permControl").checked,
-    clipboard:$("permClipboard").checked,
-    files:$("permFiles").checked,
-    audio:$("permAudio").checked
-  };
-
-  window.remoteAssist.setControlEnabled(permissions.control);
-  if (code) host.emit("set-permissions", { code, permissions });
-  saveHistory("Permissions modifiées", `Contrôle ${permissions.control ? "oui" : "non"} • presse-papiers ${permissions.clipboard ? "oui" : "non"} • documents ${permissions.files ? "oui" : "non"}`);
-  setStatus("Permissions appliquées");
-};
-
-$("profile").onchange = () => {
-  if (hostPeer) Perf.apply(hostPeer, Perf.profiles[$("profile").value]);
-};
-
-function startStats(peer) {
-  if (statsTimer) clearInterval(statsTimer);
-  statsTimer = Perf.monitor(peer, (stats) => {
-    $("sent").textContent = Math.round(stats.sent);
-    $("recv").textContent = Math.round(stats.recv);
-    $("ping").textContent = `${stats.rtt} ms`;
-    $("rate").textContent = `${stats.mbps.toFixed(1)} Mb/s`;
-    $("loss").textContent = `${stats.loss.toFixed(1)} %`;
-    $("codec").textContent = stats.codec;
-    $("resolution").textContent = stats.resolution;
-
-    if ($("profile").value === "auto" && hostPeer) {
-      Perf.apply(hostPeer, Perf.adaptive(stats));
-    }
-  });
-}
-
-function videoPosition(event) {
-  const video = $("remoteVideo");
-  const rect = video.getBoundingClientRect();
+function activePermissions() {
   return {
-    x:Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-    y:Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+    control: $("allowControl").checked,
+    clipboard: $("allowClipboard").checked,
+    files: $("allowFiles").checked
   };
 }
 
-let queuedMouse = null;
-let mouseFrame = false;
+async function flushCandidates() {
+  if (!state.peer?.remoteDescription) return;
+  for (const candidate of state.candidateQueue.splice(0)) {
+    try { await state.peer.addIceCandidate(candidate); } catch (error) { console.warn(error); }
+  }
+}
 
-$("remoteVideo").addEventListener("mousemove", (event) => {
-  queuedMouse = event;
-  if (mouseFrame) return;
-  mouseFrame = true;
+async function createPeer(isHost) {
+  const iceServers = await bridge.getIceServers();
+  const peer = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
+  state.peer = peer;
+  state.candidateQueue = [];
 
-  requestAnimationFrame(() => {
-    mouseFrame = false;
-    if (viewer && permissions.control) {
-      viewer.emit("remote-input", {
-        code:viewerCode,
-        payload:{ type:"mousemove", ...videoPosition(queuedMouse) }
-      });
+  peer.onicecandidate = ({ candidate }) => {
+    if (candidate) state.socket.emit("signal", { code: activeCode(), data: { type: "candidate", candidate } });
+  };
+  peer.onconnectionstatechange = () => {
+    $("sessionState").textContent = peer.connectionState;
+    if (peer.connectionState === "connected") {
+      status("Connexion établie");
+      showPanel("session");
+      monitorStats(peer);
     }
-  });
-});
+    if (["failed", "closed"].includes(peer.connectionState)) stopSession(false);
+  };
+  if (!isHost) {
+    peer.ontrack = ({ streams }) => {
+      $("remoteVideo").srcObject = streams[0];
+      $("screenEmpty").hidden = true;
+      $("remoteVideo").focus();
+    };
+  }
+  return peer;
+}
 
-["mousedown", "mouseup"].forEach((type) => {
-  $("remoteVideo").addEventListener(type, (event) => {
-    if (viewer && permissions.control) {
-      viewer.emit("remote-input", {
-        code:viewerCode,
-        payload:{ type, button:event.button, ...videoPosition(event) }
+async function handleSignal({ data }) {
+  if (!state.peer) return;
+  if (data.type === "offer") {
+    await state.peer.setRemoteDescription(data.sdp);
+    await flushCandidates();
+    const answer = await state.peer.createAnswer();
+    await state.peer.setLocalDescription(answer);
+    state.socket.emit("signal", { code: activeCode(), data: { type: "answer", sdp: state.peer.localDescription } });
+  } else if (data.type === "answer") {
+    await state.peer.setRemoteDescription(data.sdp);
+    await flushCandidates();
+  } else if (data.type === "candidate") {
+    if (state.peer.remoteDescription) await state.peer.addIceCandidate(data.candidate);
+    else state.candidateQueue.push(data.candidate);
+  }
+}
+
+function bindSocket(socket) {
+  socket.on("connect", () => {
+    $("onlineDot").classList.add("online");
+    $("connectionLabel").textContent = "Serveur connecté";
+  });
+  socket.on("disconnect", () => {
+    $("onlineDot").classList.remove("online");
+    $("connectionLabel").textContent = "Serveur hors ligne";
+  });
+  socket.on("connect_error", () => status("Serveur inaccessible"));
+  socket.on("host-created", ({ code }) => {
+    state.sessionCode = code;
+    $("localCode").textContent = formatCode(code);
+    status("Code prêt pendant 10 minutes");
+  });
+  socket.on("session-expired", () => {
+    state.sessionCode = null;
+    $("localCode").textContent = "Code expiré";
+  });
+  socket.on("incoming-request", ({ viewerSocketId, deviceName }) => {
+    state.pendingViewer = viewerSocketId;
+    $("requester").textContent = `${deviceName || "Un ordinateur"} souhaite voir votre écran.`;
+    $("requestDialog").showModal();
+  });
+  socket.on("viewer-approved", async ({ code, permissions }) => {
+    state.remoteCode = code;
+    state.permissions = permissions;
+    await createPeer(false);
+    status("Demande acceptée");
+  });
+  socket.on("viewer-denied", ({ reason }) => status(reason));
+  socket.on("viewer-ready", async () => {
+    if (!state.stream) return status("Sélectionnez d’abord un écran");
+    const peer = await createPeer(true);
+    state.stream.getTracks().forEach((track) => peer.addTrack(track, state.stream));
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    socket.emit("signal", { code: state.sessionCode, data: { type: "offer", sdp: peer.localDescription } });
+  });
+  socket.on("signal", (payload) => handleSignal(payload).catch((error) => status(`Connexion impossible : ${error.message}`)));
+  socket.on("permissions-state", (permissions) => { state.permissions = permissions; });
+  socket.on("remote-input", (payload) => bridge.sendRemoteInput(payload));
+  socket.on("chat-message", ({ text }) => addMessage(text));
+  socket.on("clipboard-share", ({ text }) => {
+    $("clipboardText").value = text;
+    status("Texte partagé reçu");
+  });
+  socket.on("file-offer", ({ id, name, size }) => {
+    const accepted = state.permissions.files && confirm(`Accepter ${name} (${Math.ceil(size / 1024)} Ko) ?`);
+    socket.emit("file-decision", { id, accepted });
+    $("fileStatus").textContent = accepted ? "En attente du fichier…" : "Fichier refusé";
+  });
+  socket.on("file-decision", async ({ id, accepted }) => {
+    const file = $("fileInput").files[0];
+    if (!accepted || !file || id !== `${file.name}:${file.size}`) return status("Fichier refusé");
+    socket.emit("file-data", { id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
+    $("fileStatus").textContent = "Fichier envoyé";
+  });
+  socket.on("file-data", async ({ name, data }) => {
+    const result = await bridge.saveReceivedFile({ name, data });
+    $("fileStatus").textContent = result.ok ? "Fichier enregistré" : "Enregistrement annulé";
+  });
+  socket.on("session-ended", () => stopSession(false));
+  socket.on("viewer-left", () => {
+    bridge.setControlEnabled({ enabled: false, bounds: null });
+    status("Le correspondant a quitté la session");
+  });
+}
+
+async function chooseSource() {
+  const sources = await bridge.listSources();
+  $("sourceGrid").replaceChildren();
+  for (const source of sources) {
+    const button = document.createElement("button");
+    const image = document.createElement("img");
+    const label = document.createElement("b");
+    image.src = source.thumbnail;
+    label.textContent = source.name;
+    button.append(image, label);
+    button.onclick = async (event) => {
+      event.preventDefault();
+      state.stream?.getTracks().forEach((track) => track.stop());
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: source.id, maxWidth: 2560, maxHeight: 1440, maxFrameRate: 60 } }
       });
-    }
-  });
-});
+      state.selectedBounds = source.bounds;
+      $("localVideo").srcObject = state.stream;
+      $("sourceLabel").textContent = source.name;
+      $("sourceDialog").close();
+      status("Écran prêt à partager");
+    };
+    $("sourceGrid").appendChild(button);
+  }
+  $("sourceDialog").showModal();
+}
 
-$("remoteVideo").addEventListener("contextmenu", (event) => event.preventDefault());
-
-$("remoteVideo").addEventListener("wheel", (event) => {
-  if (!viewer || !permissions.control) return;
-  event.preventDefault();
-  viewer.emit("remote-input", {
-    code:viewerCode,
-    payload:{ type:"wheel", deltaY:event.deltaY }
-  });
-}, { passive:false });
-
-$("remoteVideo").addEventListener("keydown", (event) => {
-  if (!viewer || !permissions.control) return;
-  event.preventDefault();
-  viewer.emit("remote-input", {
-    code:viewerCode,
-    payload:{ type:"keydown", key:event.key }
-  });
-});
-
-$("fullscreen").onclick = async () => {
-  if ($("remoteVideo").srcObject) await $("remoteVideo").requestFullscreen();
-};
-
-function stopAll() {
-  if (statsTimer) clearInterval(statsTimer);
-  stream?.getTracks().forEach((track) => track.stop());
-  hostPeer?.close();
-  viewerPeer?.close();
-  viewer?.disconnect();
-
-  stream = null;
-  hostPeer = null;
-  viewerPeer = null;
-  viewer = null;
+async function stopSession(notify = true) {
+  if (notify && activeCode()) state.socket.emit("end-session", { code: activeCode() });
+  clearInterval(state.statsTimer);
+  state.stream?.getTracks().forEach((track) => track.stop());
+  state.peer?.close();
+  await bridge.setControlEnabled({ enabled: false, bounds: null });
+  Object.assign(state, { peer: null, stream: null, remoteCode: null, selectedBounds: null, candidateQueue: [] });
   $("remoteVideo").srcObject = null;
   $("localVideo").srcObject = null;
-  setStatus("Prêt");
-  showView("home");
+  $("screenEmpty").hidden = false;
+  $("sessionState").textContent = "Aucune session";
+  status("Session arrêtée");
+  showPanel("home");
 }
 
-$("stop").onclick = stopAll;
-$("clearHistory").onclick = () => {
-  localStorage.removeItem("madrador-history");
-  renderHistory();
-};
-
-
-// Serveur de signalisation partagé (nécessaire entre deux PC différents)
-const signalingInput = $("signalingUrl");
-if (signalingInput) signalingInput.value = signalingUrl;
-$("saveSignaling")?.addEventListener("click", () => {
-  const value = signalingInput.value.trim().replace(/\/$/, "");
-  try {
-    const parsed = new URL(value);
-    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Protocole invalide");
-    localStorage.setItem(SIGNALING_KEY, parsed.origin);
-    signalingUrl = parsed.origin;
-    $("signalingStatus").textContent = "Adresse enregistrée. Redémarre l’application sur les deux PC.";
-  } catch {
-    $("signalingStatus").textContent = "Adresse invalide. Exemple : https://serveur.example.com";
-  }
-});
-$("resetSignaling")?.addEventListener("click", () => {
-  localStorage.removeItem(SIGNALING_KEY);
-  signalingUrl = defaultSignalingUrl;
-  signalingInput.value = signalingUrl;
-  $("signalingStatus").textContent = "Serveur local restauré.";
-});
-
-// Madrador Remote V5 modules
-let lastV5Stats = null;
-let recIndicator = null;
-
-document.addEventListener("DOMContentLoaded", async () => {
-  window.MadradorV5.setTheme(window.MadradorV5.state.theme);
-
-  try {
-    const response = await fetch("/v5-modules.json");
-    if (response.ok) {
-      const modules = await response.json();
-      const matrix = $("moduleMatrix");
-      if (matrix) {
-        matrix.innerHTML = modules.map((module) => `
-          <div class="module-item">
-            <strong>${module.id}. ${module.name}</strong>
-            <small>${module.detail}</small>
-            <span class="state ${module.status}">${module.status}</span>
-          </div>
-        `).join("");
+function monitorStats(peer) {
+  clearInterval(state.statsTimer);
+  let lastBytes = 0;
+  let lastAt = performance.now();
+  state.statsTimer = setInterval(async () => {
+    const report = await peer.getStats();
+    report.forEach((item) => {
+      if (item.type === "inbound-rtp" && item.kind === "video") {
+        const now = performance.now();
+        const mbps = Math.max(0, (item.bytesReceived - lastBytes) * 8 / (now - lastAt) / 1000);
+        lastBytes = item.bytesReceived;
+        lastAt = now;
+        $("bitrate").textContent = `${mbps.toFixed(1)} Mb/s`;
+        $("resolution").textContent = item.frameWidth ? `${item.frameWidth}×${item.frameHeight}` : "—";
       }
-    }
-  } catch (error) {
-    console.warn("Matrice V5 indisponible", error);
-  }
-});
+      if (item.type === "candidate-pair" && item.state === "succeeded") $("latency").textContent = `${Math.round((item.currentRoundTripTime || 0) * 1000)} ms`;
+    });
+  }, 1000);
+}
 
-const originalStartStats = startStats;
-startStats = function(peer) {
-  if (statsTimer) clearInterval(statsTimer);
-  statsTimer = Perf.monitor(peer, (stats) => {
-    lastV5Stats = stats;
-    $("sent").textContent = Math.round(stats.sent);
-    $("recv").textContent = Math.round(stats.recv);
-    $("ping").textContent = `${stats.rtt} ms`;
-    $("rate").textContent = `${stats.mbps.toFixed(1)} Mb/s`;
-    $("loss").textContent = `${stats.loss.toFixed(1)} %`;
-    $("codec").textContent = stats.codec;
-    $("resolution").textContent = stats.resolution;
-
-    const diagnostic = window.MadradorV5.diagnose(stats);
-    if ($("aiDiagnostic")) $("aiDiagnostic").textContent = diagnostic;
-
-    if ($("profile").value === "auto" && hostPeer) {
-      Perf.apply(hostPeer, Perf.adaptive(stats));
+function sendInput(type, event, extra = {}) {
+  if (!state.remoteCode || !state.permissions.control) return;
+  const rect = $("remoteVideo").getBoundingClientRect();
+  state.socket.emit("remote-input", {
+    code: state.remoteCode,
+    payload: {
+      type,
+      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+      ...extra
     }
   });
-};
+}
 
-$("runDiagnostic")?.addEventListener("click", () => {
-  $("aiDiagnostic").textContent = window.MadradorV5.diagnose(lastV5Stats);
-});
+async function init() {
+  if (!bridge) throw new Error("API Electron indisponible");
+  const info = await bridge.systemInfo();
+  $("deviceLabel").textContent = `${info.hostname} · ${info.displays} écran(s)`;
+  const configured = localStorage.getItem(SERVER_KEY) || await bridge.getSignalUrl() || "http://127.0.0.1:3000";
+  $("serverUrl").value = configured;
+  state.socket = io(configured, { transports: ["websocket", "polling"], timeout: 10000 });
+  bindSocket(state.socket);
 
-$("themeDark")?.addEventListener("click", () => window.MadradorV5.setTheme("dark"));
-$("themeLight")?.addEventListener("click", () => window.MadradorV5.setTheme("light"));
+  document.querySelectorAll(".nav").forEach((button) => button.onclick = () => showPanel(button.dataset.panel));
+  $("remoteCode").oninput = (event) => { event.target.value = formatCode(event.target.value); };
+  $("chooseSource").onclick = () => chooseSource().catch((error) => status(error.message));
+  $("createSession").onclick = () => {
+    if (!state.stream) return status("Choisissez d’abord un écran");
+    state.permissions = activePermissions();
+    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions });
+    status("Création du code…");
+  };
+  $("connect").onclick = () => {
+    const code = $("remoteCode").value.replace(/\D/g, "");
+    if (code.length !== 9) return status("Le code doit contenir 9 chiffres");
+    state.remoteCode = code;
+    state.socket.emit("viewer-request", { code, deviceName: info.hostname });
+    status("Demande envoyée");
+  };
+  $("deny").onclick = () => {
+    state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: false });
+    $("requestDialog").close();
+  };
+  $("accept").onclick = async () => {
+    state.permissions = activePermissions();
+    state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: true, permissions: state.permissions });
+    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+    $("requestDialog").close();
+  };
+  $("applyPermissions").onclick = async () => {
+    state.permissions = activePermissions();
+    state.socket.emit("set-permissions", { code: state.sessionCode, permissions: state.permissions });
+    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+    status("Permissions mises à jour");
+  };
+  $("sendMessage").onclick = () => {
+    const text = $("messageInput").value.trim();
+    if (!text || !activeCode()) return;
+    state.socket.emit("chat-message", { code: activeCode(), text });
+    addMessage(text, true);
+    $("messageInput").value = "";
+  };
+  $("sendFile").onclick = () => {
+    const file = $("fileInput").files[0];
+    if (!file || !activeCode()) return status("Choisissez un fichier pendant une session");
+    if (file.size > MAX_FILE_SIZE) return status("Le fichier dépasse 25 Mo");
+    const id = `${file.name}:${file.size}`;
+    state.socket.emit("file-offer", { code: activeCode(), id, name: file.name, type: file.type, size: file.size });
+    $("fileStatus").textContent = "Proposition envoyée";
+  };
+  $("readClipboard").onclick = async () => {
+    $("clipboardText").value = await bridge.clipboardRead();
+  };
+  $("sendClipboard").onclick = () => {
+    if (!activeCode() || !state.permissions.clipboard) return status("Presse-papiers non autorisé");
+    state.socket.emit("clipboard-share", { code: activeCode(), text: $("clipboardText").value });
+    status("Texte partagé");
+  };
+  $("saveServer").onclick = () => {
+    try {
+      const url = new URL($("serverUrl").value);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+      localStorage.setItem(SERVER_KEY, url.origin);
+      location.reload();
+    } catch { status("Adresse de serveur invalide"); }
+  };
+  $("stop").onclick = () => stopSession();
+  $("fullscreen").onclick = () => $("remoteVideo").requestFullscreen();
+  ["mousedown", "mouseup"].forEach((type) => $("remoteVideo").addEventListener(type, (event) => sendInput(type, event, { button: event.button })));
+  $("remoteVideo").addEventListener("mousemove", (event) => sendInput("mousemove", event));
+  $("remoteVideo").addEventListener("wheel", (event) => { event.preventDefault(); sendInput("wheel", event, { deltaY: event.deltaY }); }, { passive: false });
+  $("remoteVideo").addEventListener("keydown", (event) => { event.preventDefault(); sendInput("keydown", event, { key: event.key }); });
+  $("remoteVideo").addEventListener("contextmenu", (event) => event.preventDefault());
+}
 
-$("enableGaming")?.addEventListener("click", async () => {
-  $("profile").value = "ultra";
-  if (hostPeer) await Perf.apply(hostPeer, Perf.profiles.ultra);
-  setStatus("Mode Gaming activé");
-});
-
-$("startRecording")?.addEventListener("click", async () => {
-  try {
-    await window.MadradorV5.startRecording($("remoteVideo"));
-    $("recordingStatus").textContent = "Enregistrement en cours…";
-    recIndicator = document.createElement("div");
-    recIndicator.className = "rec-indicator";
-    recIndicator.textContent = "● REC";
-    document.body.appendChild(recIndicator);
-  } catch (error) {
-    $("recordingStatus").textContent = error.message;
-  }
-});
-
-$("stopRecording")?.addEventListener("click", async () => {
-  try {
-    const blob = await window.MadradorV5.stopRecording();
-    window.MadradorV5.downloadRecording(blob);
-    $("recordingStatus").textContent = "Enregistrement exporté.";
-    recIndicator?.remove();
-    recIndicator = null;
-  } catch (error) {
-    $("recordingStatus").textContent = error.message;
-  }
-});
+init().catch((error) => status(`Démarrage impossible : ${error.message}`));

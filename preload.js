@@ -1,12 +1,13 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("remoteAssist", {
+contextBridge.exposeInMainWorld("remoteAssist", Object.freeze({
   systemInfo: () => ipcRenderer.invoke("system-info"),
   listSources: () => ipcRenderer.invoke("list-sources"),
-  setControlEnabled: (enabled) => ipcRenderer.invoke("set-control-enabled", enabled),
-  sendRemoteInput: (payload) => ipcRenderer.invoke("remote-input", payload),
+  setControlEnabled: (value) => ipcRenderer.invoke("set-control-enabled", value),
+  sendRemoteInput: (value) => ipcRenderer.invoke("remote-input", value),
   clipboardRead: () => ipcRenderer.invoke("clipboard-read"),
-  clipboardWrite: (payload) => ipcRenderer.invoke("clipboard-write", payload),
-  saveReceivedFile: (file) => ipcRenderer.invoke("save-received-file", file),
-  openPath: (filePath) => ipcRenderer.invoke("open-path", filePath)
-});
+  clipboardWrite: (text) => ipcRenderer.invoke("clipboard-write", text),
+  saveReceivedFile: (file) => ipcRenderer.invoke("save-file", file),
+  getSignalUrl: () => ipcRenderer.invoke("get-signal-url"),
+  getIceServers: () => ipcRenderer.invoke("get-ice-servers")
+}));
