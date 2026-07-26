@@ -15,10 +15,11 @@
     "test:security": "node scripts/security-check.js",
     "test": "node scripts/test.js",
     "diagnose": "node scripts/diagnose.js",
-    "publish:all": "PUBLICATION-TOTALE.bat"
+    "site": "LANCER-LE-SITE.bat"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.2",
+    "dotenv": "^16.6.1",
     "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.0",

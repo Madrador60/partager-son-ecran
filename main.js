@@ -1,3 +1,4 @@
+require("dotenv").config();
 const { app, BrowserWindow, Menu, ipcMain, desktopCapturer, screen, clipboard, dialog, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
