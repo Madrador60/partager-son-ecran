@@ -12,7 +12,9 @@ Application Windows d’assistance à distance visible et consentie. Madrador Re
 
 ## Télécharger
 
-Le bouton du site interroge l’API interne puis télécharge directement l’installateur `.exe` de la dernière release stable. La page [Releases](https://github.com/Madrador60/partager-son-ecran/releases) sert uniquement de secours, d’historique et de consultation des checksums. Sans release contenant un fichier `Madrador-Remote-Setup-*.exe`, le téléchargement direct ne peut pas fonctionner.
+Le bouton du site interroge l’API GitHub côté serveur avec un cache de dix minutes puis télécharge directement l’installateur `.exe` de la dernière release stable. La version, la taille, la date et les notes de version sont alimentées par cette API : aucune modification du HTML n’est nécessaire lors d’une publication.
+
+La page [Releases](https://github.com/Madrador60/partager-son-ecran/releases) sert uniquement de secours, d’historique et de consultation des checksums. Sans release contenant un fichier `Madrador-Remote-Setup-*.exe`, le téléchargement direct ne peut pas fonctionner.
 
 ## Utiliser Madrador Remote sans installer l’application
 
@@ -160,7 +162,36 @@ npm run verify
 npm run build
 ```
 
-La validation contrôle la syntaxe, le serveur, la création et l’approbation d’une session, les fichiers indispensables au packaging et les protections Electron. Un tag Git `v*` crée automatiquement une release et son installeur Windows.
+La validation contrôle la syntaxe, le serveur, la création et l’approbation d’une session, les fichiers indispensables au packaging et les protections Electron.
+
+## Publier une nouvelle version
+
+Deux méthodes sont disponibles :
+
+1. mettre à jour `package.json` et `package-lock.json`, puis pousser un tag correspondant ;
+
+   ```powershell
+   npm version 6.2.0
+   git push
+   git push origin v6.2.0
+   ```
+
+2. lancer manuellement le workflow **Release** dans GitHub Actions et saisir `6.2.0`. Le workflow applique cette version uniquement au build publié.
+
+Le workflow :
+
+- vérifie que le tag et la version du paquet correspondent ;
+- exécute tous les tests ;
+- compile l’application et l’installeur NSIS ;
+- produit `latest.yml` et le blockmap utilisés par `electron-updater` ;
+- génère un checksum SHA-256 de l’installateur ;
+- crée ou met à jour la Release GitHub avec des notes automatiques ;
+- publie l’EXE, `latest.yml`, le blockmap et le fichier `.sha256` ;
+- relit la Release via l’API GitHub et échoue si un fichier manque.
+
+Au démarrage, la version installée vérifie GitHub au maximum une fois toutes les six heures. Le bouton **Rechercher une mise à jour** ignore ce cache. `electron-updater` vérifie le SHA-512 déclaré dans `latest.yml` et l’application contrôle également le SHA-256 publié lorsqu’il est disponible. Une mise à jour téléchargée peut être installée immédiatement ou automatiquement à la fermeture de l’application.
+
+> Pour éviter les avertissements SmartScreen et obtenir une chaîne de confiance comparable aux logiciels commerciaux, configurez ensuite un certificat de signature de code Windows dans les secrets GitHub Actions. Le mécanisme de mise à jour fonctionne sans ce certificat, mais Windows affichera davantage d’avertissements.
 
 ## Sécurité
 

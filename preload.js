@@ -16,5 +16,6 @@ contextBridge.exposeInMainWorld("remoteAssist", Object.freeze({
   updateAction: (action) => ipcRenderer.invoke("update-action", action),
   onAvailabilityChanged: (callback) => ipcRenderer.on("availability-changed", (_event, value) => callback(value)),
   onStopConnections: (callback) => ipcRenderer.on("stop-connections", callback),
-  onUpdaterStatus: (callback) => ipcRenderer.on("updater-status", (_event, value) => callback(value))
+  onUpdaterStatus: (callback) => ipcRenderer.on("updater-status", (_event, value) => callback(value)),
+  onOpenUpdateDialog: (callback) => ipcRenderer.on("open-update-dialog", callback)
 }));

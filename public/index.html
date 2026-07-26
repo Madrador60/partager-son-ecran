@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http: https: ws: wss:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
   <title>Madrador Remote</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="update.css">
 </head>
 <body>
   <div class="ambient one"></div><div class="ambient two"></div>
@@ -141,6 +142,22 @@
   <dialog id="sourceDialog"><form method="dialog"><header><div><span class="overline">SOURCE VIDÉO</span><h2>Choisir ce qui sera visible</h2></div><button value="cancel" aria-label="Fermer">×</button></header><div id="sourceGrid" class="source-grid"></div></form></dialog>
   <dialog id="requestDialog"><div class="request"><span class="request-icon">⌁</span><span class="overline">CONNEXION ENTRANTE</span><h2>Autoriser cet appareil ?</h2><p id="requester">Un ordinateur souhaite se connecter.</p><div class="request-permissions"><span>▣ Écran</span><span>⌁ Contrôle selon vos permissions</span></div><div class="dialog-actions"><button id="deny" class="button secondary">Refuser</button><button id="accept" class="button primary">Accepter la connexion</button></div></div></dialog>
   <dialog id="fileDialog"><div class="request"><span class="request-icon">⇧</span><span class="overline">FICHIER ENTRANT</span><h2>Accepter le transfert ?</h2><p id="fileOfferText"></p><div class="dialog-actions"><button id="rejectFile" class="button secondary">Refuser</button><button id="acceptFile" class="button primary">Accepter</button></div></div></dialog>
+  <dialog id="updateDialog" class="update-dialog">
+    <div class="update-modal">
+      <button id="closeUpdateDialog" class="update-close" aria-label="Plus tard">×</button>
+      <span class="update-rocket">🚀</span><span class="overline">MISE À JOUR DISPONIBLE</span>
+      <h2 id="updateDialogTitle">Nouvelle version disponible !</h2>
+      <p id="updateDialogDescription"></p>
+      <div id="updateDialogNotes" class="update-notes"></div>
+      <div id="downloadMetrics" class="download-metrics" hidden><span><b id="downloadPercent">0 %</b><small>Progression</small></span><span><b id="downloadSpeed">—</b><small>Vitesse</small></span><span><b id="downloadEta">—</b><small>Temps restant</small></span></div>
+      <progress id="updateDialogProgress" max="100" value="0" hidden></progress>
+      <p id="integrityStatus" class="integrity" hidden></p>
+      <div class="dialog-actions">
+        <button id="updateLater" class="button secondary">Plus tard</button>
+        <button id="updatePrimary" class="button primary">Télécharger maintenant</button>
+      </div>
+    </div>
+  </dialog>
 
   <script src="vendor/socket.io.min.js"></script>
   <script type="module" src="app.js"></script>

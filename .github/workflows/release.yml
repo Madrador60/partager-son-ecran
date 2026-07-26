@@ -3,48 +3,123 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à publier (ex. 6.2.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}-${{ inputs.version || 'tag' }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  build-and-publish:
     runs-on: windows-latest
     env:
-      NODE_VERSION: 20.x
+      NODE_VERSION: 22.x
+      RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
+
+      - name: Resolve and validate version
+        shell: pwsh
+        run: |
+          $version = "${env:RELEASE_VERSION}".TrimStart("v")
+          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
+            throw "Version invalide: $version"
+          }
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            npm version $version --no-git-tag-version
+          } else {
+            $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+            if ($packageVersion -ne $version) {
+              throw "Le tag v$version ne correspond pas à package.json ($packageVersion)."
+            }
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=v$version" >> $env:GITHUB_ENV
+
       - run: npm ci
-      - name: Verify
+
+      - name: Verify source
         run: npm run verify
-      - name: Build
+
+      - name: Build Windows installer and updater metadata
         run: npm run dist
-      - name: Generate checksum
-        shell: powershell
-        run: Get-ChildItem dist/*.exe | ForEach-Object { $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash; "$hash  $($_.Name)" | Set-Content "$($_.FullName).sha256" }
-      - name: Create Release
+
+      - name: Generate SHA-256
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "dist/Madrador-Remote-Setup-$env:VERSION.exe" -ErrorAction Stop
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+
+      - name: Validate release artifacts
+        shell: pwsh
+        run: |
+          $installer = "dist/Madrador-Remote-Setup-$env:VERSION.exe"
+          $required = @($installer, "$installer.blockmap", "$installer.sha256", "dist/latest.yml")
+          foreach ($file in $required) {
+            if (-not (Test-Path $file -PathType Leaf)) { throw "Artefact manquant: $file" }
+            if ((Get-Item $file).Length -eq 0) { throw "Artefact vide: $file" }
+          }
+          $latest = Get-Content "dist/latest.yml" -Raw
+          if ($latest -notmatch [regex]::Escape("Madrador-Remote-Setup-$env:VERSION.exe")) { throw "latest.yml ne référence pas le bon installateur." }
+          if ($latest -notmatch "sha512:") { throw "latest.yml ne contient pas de checksum SHA-512." }
+          $checksum = (Get-Content "$installer.sha256" -Raw).Split(" ")[0]
+          if ($checksum -notmatch '^[a-f0-9]{64}$') { throw "Checksum SHA-256 invalide." }
+
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
           files: |
-            dist/*.exe
-            dist/*.yml
-            dist/*.blockmap
-            dist/*.sha256
-      - name: Upload Assets
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe.blockmap
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe.sha256
+            dist/latest.yml
+
+      - name: Verify published Release
+        shell: pwsh
+        run: |
+          $assets = gh release view "$env:RELEASE_TAG" --repo "${{ github.repository }}" --json assets --jq ".assets[].name"
+          $expected = @(
+            "Madrador-Remote-Setup-$env:VERSION.exe",
+            "Madrador-Remote-Setup-$env:VERSION.exe.blockmap",
+            "Madrador-Remote-Setup-$env:VERSION.exe.sha256",
+            "latest.yml"
+          )
+          foreach ($name in $expected) {
+            if ($assets -notcontains $name) { throw "Fichier absent de la Release: $name" }
+          }
+
+      - name: Keep build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: installer
+          name: madrador-remote-${{ env.VERSION }}
           path: |
-            dist/*.exe
-            dist/*.yml
-            dist/*.blockmap
-            dist/*.sha256
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe.blockmap
+            dist/Madrador-Remote-Setup-${{ env.VERSION }}.exe.sha256
+            dist/latest.yml
+          if-no-files-found: error

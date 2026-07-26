@@ -23,7 +23,8 @@ const state = {
   sessionStartedAt: 0,
   durationTimer: null,
   zoom: 1,
-  pendingFileOffer: null
+  pendingFileOffer: null,
+  update: { status: "idle" }
 };
 
 function notify(message, type = "info", title = "Madrador Remote") {
@@ -533,9 +534,20 @@ async function init() {
     $("availabilityText").textContent = value ? "Disponible" : "Indisponible";
   });
   bridge.onUpdaterStatus(updateUpdater);
+  bridge.onOpenUpdateDialog(() => $("updateDialog").showModal());
   $("updateButton").onclick = () => bridge.updateAction($("updateButton").dataset.action || "check").then((result) => {
     if (!result.ok) notify(result.error, "error");
   }).catch((error) => notify(error.message, "error"));
+  $("closeUpdateDialog").onclick = () => $("updateDialog").close();
+  $("updateLater").onclick = () => {
+    if (state.update.status === "downloaded") bridge.updateAction("later");
+    $("updateDialog").close();
+    notify(state.update.status === "downloaded" ? "La mise à jour sera installée à la fermeture de l’application." : "Nous vous le rappellerons plus tard.");
+  };
+  $("updatePrimary").onclick = () => {
+    const action = state.update.status === "downloaded" ? "install" : "download";
+    bridge.updateAction(action).catch((error) => notify(error.message, "error"));
+  };
   renderRecents();
   renderHistory();
   ["mousedown", "mouseup"].forEach((type) => $("remoteVideo").addEventListener(type, (event) => sendInput(type, event, { button: event.button })));
@@ -559,15 +571,59 @@ function updateZoom() {
   $("zoomLevel").textContent = `${Math.round(state.zoom * 100)}%`;
 }
 function updateUpdater(data) {
-  const labels = { checking: ["Recherche en cours…", "Connexion au service de mises à jour."], available: [`Version ${data.version} disponible`, "Une nouvelle version est prête à télécharger."], current: ["Madrador Remote est à jour", `Version ${data.version}`], downloading: ["Téléchargement en cours", `${data.percent}% téléchargés`], downloaded: [`Version ${data.version} prête`, "Installez maintenant ou au prochain redémarrage."], error: ["Mise à jour indisponible", data.message || "Réessayez plus tard."] };
+  state.update = data;
+  const labels = {
+    idle: ["Mises à jour", "Vérification automatique au démarrage."],
+    development: ["Mode développement", "Les mises à jour sont actives dans la version installée."],
+    cached: ["Vérification récente", "La prochaine vérification automatique aura lieu plus tard."],
+    checking: ["Recherche en cours…", "Connexion au service de mises à jour."],
+    available: [`Version ${data.version} disponible`, "Une nouvelle version est prête à télécharger."],
+    current: ["Madrador Remote est à jour", `Version ${data.version}`],
+    downloading: ["Téléchargement en cours", `${data.percent}% téléchargés`],
+    downloaded: [`Version ${data.version} prête`, "Installez maintenant ou au prochain redémarrage."],
+    scheduled: ["Installation planifiée", "La mise à jour sera installée à la fermeture de l’application."],
+    error: ["Mise à jour indisponible", data.message || "Réessayez plus tard."]
+  };
   const [title, description] = labels[data.status] || labels.error;
   $("updateTitle").textContent = title;
   $("updateDescription").textContent = description;
   $("updateProgress").hidden = data.status !== "downloading";
   $("updateProgress").value = data.percent || 0;
-  $("releaseNotes").textContent = typeof data.notes === "string" ? data.notes.slice(0, 1000) : "";
+  const notes = typeof data.notes === "string" ? data.notes : Array.isArray(data.notes) ? data.notes.map((note) => note.note || "").join("\n") : "";
+  $("releaseNotes").textContent = notes.slice(0, 1000);
   if (data.status === "available") { $("updateButton").textContent = "Télécharger"; $("updateButton").dataset.action = "download"; }
   else if (data.status === "downloaded") { $("updateButton").textContent = "Installer maintenant"; $("updateButton").dataset.action = "install"; }
+  else if (["current", "cached", "development", "error"].includes(data.status)) { $("updateButton").textContent = "Rechercher une mise à jour"; $("updateButton").dataset.action = "check"; }
+
+  if (["available", "downloading", "downloaded"].includes(data.status)) {
+    if (!$("updateDialog").open) $("updateDialog").showModal();
+    $("updateDialogTitle").textContent = data.status === "downloaded" ? "La mise à jour est prête." : data.status === "downloading" ? "Téléchargement en cours…" : "Nouvelle version disponible !";
+    $("updateDialogDescription").textContent = data.status === "available" ? `Madrador Remote ${data.version} est disponible.` : data.status === "downloaded" ? `Madrador Remote ${data.version} a été téléchargé et vérifié.` : "Vous pouvez continuer à utiliser l’application.";
+    $("updateDialogNotes").textContent = notes || "Corrections, améliorations et optimisations incluses dans cette version.";
+    const downloading = data.status === "downloading";
+    $("downloadMetrics").hidden = !downloading;
+    $("updateDialogProgress").hidden = !downloading;
+    $("updateDialogProgress").value = data.percent || 0;
+    $("downloadPercent").textContent = `${data.percent || 0} %`;
+    $("downloadSpeed").textContent = formatBytes(data.bytesPerSecond || 0) + "/s";
+    $("downloadEta").textContent = data.secondsRemaining == null ? "Calcul…" : formatEta(data.secondsRemaining);
+    $("integrityStatus").hidden = data.status !== "downloaded";
+    $("integrityStatus").textContent = data.integrity?.verified ? `✓ Intégrité vérifiée (${data.integrity.algorithm})` : "✓ Téléchargement vérifié par electron-updater";
+    $("updatePrimary").textContent = data.status === "downloaded" ? "Installer maintenant" : data.status === "downloading" ? "Téléchargement…" : "Télécharger maintenant";
+    $("updatePrimary").disabled = downloading;
+    $("updateLater").textContent = data.status === "downloaded" ? "Installer au prochain redémarrage" : "Plus tard";
+  }
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+function formatEta(seconds) {
+  if (seconds < 60) return `${seconds} s`;
+  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
 }
 
 init().catch((error) => notify(`Démarrage impossible : ${error.message}`, "error"));

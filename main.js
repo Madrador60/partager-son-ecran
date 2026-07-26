@@ -3,17 +3,22 @@ const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, ipcMain, desk
 const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const { createReadStream } = require("node:fs");
+const { createHash } = require("node:crypto");
 const os = require("node:os");
 const { pathToFileURL } = require("node:url");
 const { z } = require("zod");
 const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
 
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let window;
 let splash;
 let tray;
 let currentHostCode = "";
 let available = true;
 let sessionActive = false;
+let rendererReady = false;
+let lastUpdaterStatus = { status: "idle" };
 let remoteControl = { enabled: false, bounds: null };
 
 function assertTrusted(event) {
@@ -64,6 +69,11 @@ function createWindow() {
     }
   });
   window.webContents.on("will-navigate", (event) => event.preventDefault());
+  window.webContents.on("did-finish-load", () => {
+    rendererReady = true;
+    sendToRenderer("updater-status", lastUpdaterStatus);
+    checkForUpdates(false).catch((error) => publishUpdaterStatus("error", { message: error.message }));
+  });
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://")) shell.openExternal(url);
     return { action: "deny" };
@@ -72,7 +82,7 @@ function createWindow() {
 }
 
 function sendToRenderer(channel, payload) {
-  if (window && !window.isDestroyed()) window.webContents.send(channel, payload);
+  if (rendererReady && window && !window.isDestroyed()) window.webContents.send(channel, payload);
 }
 
 function createTray() {
@@ -96,17 +106,74 @@ function createTray() {
 }
 
 function publishUpdaterStatus(status, extra = {}) {
-  sendToRenderer("updater-status", { status, ...extra });
+  lastUpdaterStatus = { status, ...extra };
+  sendToRenderer("updater-status", lastUpdaterStatus);
+}
+
+async function checkForUpdates(force = false) {
+  if (!app.isPackaged) {
+    publishUpdaterStatus("development", { version: app.getVersion() });
+    return;
+  }
+  const marker = path.join(app.getPath("userData"), "last-update-check.json");
+  if (!force) {
+    try {
+      const saved = JSON.parse(await fs.readFile(marker, "utf8"));
+      if (Date.now() - Number(saved.checkedAt) < UPDATE_CHECK_INTERVAL_MS) {
+        publishUpdaterStatus("cached", { checkedAt: saved.checkedAt });
+        return;
+      }
+    } catch {}
+  }
+  await fs.writeFile(marker, JSON.stringify({ checkedAt: Date.now() }), "utf8");
+  await autoUpdater.checkForUpdates();
 }
 
 function configureUpdater() {
   autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on("checking-for-update", () => publishUpdaterStatus("checking"));
-  autoUpdater.on("update-available", (info) => publishUpdaterStatus("available", { version: info.version, notes: info.releaseNotes || "" }));
+  autoUpdater.on("update-available", (info) => {
+    publishUpdaterStatus("available", { version: info.version, notes: info.releaseNotes || "" });
+    if (Notification.isSupported()) {
+      const notification = new Notification({ title: "Nouvelle version disponible", body: `Madrador Remote ${info.version} est disponible.`, icon: path.join(__dirname, "assets", "icon.ico") });
+      notification.on("click", () => { window.show(); window.focus(); sendToRenderer("open-update-dialog"); });
+      notification.show();
+    }
+  });
   autoUpdater.on("update-not-available", (info) => publishUpdaterStatus("current", { version: info.version }));
-  autoUpdater.on("download-progress", (progress) => publishUpdaterStatus("downloading", { percent: Math.round(progress.percent), transferred: progress.transferred, total: progress.total }));
-  autoUpdater.on("update-downloaded", (info) => publishUpdaterStatus("downloaded", { version: info.version, notes: info.releaseNotes || "" }));
+  autoUpdater.on("download-progress", (progress) => {
+    const remainingBytes = Math.max(0, progress.total - progress.transferred);
+    const secondsRemaining = progress.bytesPerSecond > 0 ? Math.ceil(remainingBytes / progress.bytesPerSecond) : null;
+    publishUpdaterStatus("downloading", { percent: Math.round(progress.percent), transferred: progress.transferred, total: progress.total, bytesPerSecond: progress.bytesPerSecond, secondsRemaining });
+  });
+  autoUpdater.on("update-downloaded", async (info) => {
+    try {
+      const integrity = await verifyOptionalSha256(info);
+      publishUpdaterStatus("downloaded", { version: info.version, notes: info.releaseNotes || "", integrity });
+    } catch (error) {
+      publishUpdaterStatus("error", { message: `Échec de la vérification d’intégrité : ${error.message}` });
+    }
+  });
   autoUpdater.on("error", (error) => publishUpdaterStatus("error", { message: error.message }));
+}
+
+async function verifyOptionalSha256(info) {
+  const downloadedFile = info.downloadedFile;
+  if (!downloadedFile) return { algorithm: "SHA-512", verified: true, source: "latest.yml" };
+  const assetName = path.basename(downloadedFile);
+  const checksumUrl = `https://github.com/Madrador60/partager-son-ecran/releases/download/v${info.version}/${encodeURIComponent(assetName)}.sha256`;
+  const response = await fetch(checksumUrl, { redirect: "follow", signal: AbortSignal.timeout(10_000) });
+  if (response.status === 404) return { algorithm: "SHA-512", verified: true, source: "latest.yml" };
+  if (!response.ok) throw new Error(`SHA256_HTTP_${response.status}`);
+  const expected = (await response.text()).match(/\b[a-f0-9]{64}\b/i)?.[0]?.toLowerCase();
+  if (!expected) throw new Error("SHA256_INVALID");
+  const actual = await new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    createReadStream(downloadedFile).on("data", (chunk) => hash.update(chunk)).on("error", reject).on("end", () => resolve(hash.digest("hex")));
+  });
+  if (actual !== expected) throw new Error("SHA256_MISMATCH");
+  return { algorithm: "SHA-256", verified: true, source: `${assetName}.sha256` };
 }
 
 app.setAppUserModelId("com.madrador.remote");
@@ -114,7 +181,6 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   configureUpdater();
-  if (app.isPackaged) autoUpdater.checkForUpdates().catch((error) => publishUpdaterStatus("error", { message: error.message }));
 });
 app.on("before-quit", () => { app.isQuiting = true; });
 app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
@@ -149,9 +215,10 @@ ipcMain.handle("show-notification", (event, payload = {}) => {
 ipcMain.handle("update-action", async (event, action) => {
   assertTrusted(event);
   if (!app.isPackaged) return { ok: false, error: "Disponible dans la version installée" };
-  if (action === "check") await autoUpdater.checkForUpdates();
+  if (action === "check") await checkForUpdates(true);
   else if (action === "download") await autoUpdater.downloadUpdate();
   else if (action === "install") autoUpdater.quitAndInstall(false, true);
+  else if (action === "later") publishUpdaterStatus("scheduled", { version: lastUpdaterStatus.version });
   else throw new Error("UPDATE_ACTION_INVALID");
   return { ok: true };
 });

@@ -28,6 +28,9 @@ function normalize(release) {
     publishedAt: release.published_at,
     fileName: asset.name,
     size: asset.size,
+    releaseName: release.name || release.tag_name,
+    releaseNotes: String(release.body || "").slice(0, 20_000),
+    releaseUrl: release.html_url,
     directUrl: asset.browser_download_url,
     checksumUrl: checksum?.browser_download_url || null,
     sha256: null

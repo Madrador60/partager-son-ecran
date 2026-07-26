@@ -49,6 +49,7 @@ async function run() {
   });
   assert.equal(normalizedRelease.version, "6.1.0");
   assert.equal(normalizedRelease.fileName, "Madrador-Remote-Setup-6.1.0.exe");
+  assert.equal(normalizedRelease.releaseNotes, "");
   assert.throws(() => normalize({ draft: true, assets: [] }), /RELEASE_INVALID/);
   assert.throws(() => normalize({ draft: false, assets: [] }), /INSTALLER_NOT_FOUND/);
 
@@ -65,6 +66,7 @@ async function run() {
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
   assert.equal((await fetch(`${url}/site.css`)).status, 200);
+  assert.equal((await fetch(`${url}/release-notes.css`)).status, 200);
   assert.equal((await fetch(`${url}/remote`)).status, 200);
   assert.equal((await fetch(`${url}/remote.js`)).status, 200);
 
