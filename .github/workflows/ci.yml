@@ -24,7 +24,7 @@ jobs:
       - name: Checksum
         shell: powershell
         run: Get-FileHash dist/*.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Madrador-Remote-Windows
           path: |
