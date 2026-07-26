@@ -36,6 +36,9 @@ async function run() {
   assert.match(html, /vendor\/socket\.io\.min\.js/);
   assert.ok(fs.existsSync(path.join(root, "public", "vendor", "socket.io.min.js")));
   assert.ok(require("../package.json").build.files.includes("preload.js"));
+  const webRemote = fs.readFileSync(path.join(root, "website", "remote.js"), "utf8");
+  assert.match(webRemote, /captureDisplay/);
+  assert.match(fs.readFileSync(path.join(root, "public", "shared", "capabilities.js"), "utf8"), /getDisplayMedia/);
   assert.equal(SessionCode.safeParse("123456789").success, true);
   assert.equal(SessionCode.safeParse("123").success, false);
   assert.equal(ControlConfig.safeParse({ enabled: true, bounds: { x: -1920, y: 0, width: 1920, height: 1080 } }).success, true);
@@ -49,6 +52,7 @@ async function run() {
   });
   assert.equal(normalizedRelease.version, "6.1.0");
   assert.equal(normalizedRelease.fileName, "Madrador-Remote-Setup-6.1.0.exe");
+  assert.equal(normalizedRelease.releaseNotes, "");
   assert.throws(() => normalize({ draft: true, assets: [] }), /RELEASE_INVALID/);
   assert.throws(() => normalize({ draft: false, assets: [] }), /INSTALLER_NOT_FOUND/);
 
@@ -65,6 +69,7 @@ async function run() {
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
   assert.equal((await fetch(`${url}/site.css`)).status, 200);
+  assert.equal((await fetch(`${url}/release-notes.css`)).status, 200);
   assert.equal((await fetch(`${url}/remote`)).status, 200);
   assert.equal((await fetch(`${url}/remote.js`)).status, 200);
 
@@ -75,6 +80,7 @@ async function run() {
   host.emit("host-create", { deviceName: "Test host", permissions: { control: true } });
   const session = await once(host, "host-created");
   assert.match(session.code, /^\d{9}$/);
+  assert.equal(session.expiresAt, null);
 
   viewer.emit("viewer-request", { code: session.code, deviceName: "Test viewer" });
   const request = await once(host, "incoming-request");
@@ -87,7 +93,38 @@ async function run() {
   assert.equal(approval.code, session.code);
   assert.equal(approval.permissions.control, true);
 
+  const viewerSignal = once(viewer, "signal");
+  host.emit("signal", { code: session.code, data: { type: "offer", sdp: { type: "offer", sdp: "test-host-offer" } } });
+  assert.equal((await viewerSignal).data.sdp.sdp, "test-host-offer");
+  const hostSignal = once(host, "signal");
+  viewer.emit("signal", { code: session.code, data: { type: "answer", sdp: { type: "answer", sdp: "test-viewer-answer" } } });
+  assert.equal((await hostSignal).data.sdp.sdp, "test-viewer-answer");
+
+  const viewerLeft = once(host, "viewer-left");
   viewer.disconnect();
+  await viewerLeft;
+  const recoveredViewer = connect(url, { transports: ["websocket"], forceNew: true });
+  await once(recoveredViewer, "connect");
+  recoveredViewer.emit("viewer-request", { code: session.code, deviceName: "Recovered browser" });
+  const recoveredRequest = await once(host, "incoming-request");
+  host.emit("host-decision", { viewerSocketId: recoveredRequest.viewerSocketId, approved: true, permissions: { clipboard: true } });
+  assert.equal((await once(recoveredViewer, "viewer-approved")).code, session.code);
+
+  const limitedHost = connect(url, { transports: ["websocket"], forceNew: true });
+  const rejectedViewer = connect(url, { transports: ["websocket"], forceNew: true });
+  await Promise.all([once(limitedHost, "connect"), once(rejectedViewer, "connect")]);
+  limitedHost.emit("host-create", { deviceName: "Limited browser", durationMinutes: 1, permissions: {} });
+  const limitedSession = await once(limitedHost, "host-created");
+  assert.ok(limitedSession.expiresAt > Date.now() + 50_000 && limitedSession.expiresAt <= Date.now() + 60_000);
+  rejectedViewer.emit("viewer-request", { code: limitedSession.code, deviceName: "Rejected browser" });
+  const rejectedRequest = await once(limitedHost, "incoming-request");
+  limitedHost.emit("host-decision", { viewerSocketId: rejectedRequest.viewerSocketId, approved: false });
+  assert.match((await once(rejectedViewer, "viewer-denied")).reason, /refusée/i);
+
+  recoveredViewer.emit("end-session", { code: session.code });
+  recoveredViewer.disconnect();
+  limitedHost.disconnect();
+  rejectedViewer.disconnect();
   host.disconnect();
   await new Promise((resolve) => server.close(resolve));
   console.log("✓ Syntaxe, packaging, site, serveur et connexion de session validés.");
