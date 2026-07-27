@@ -59,8 +59,22 @@ jobs:
       - name: Verify source
         run: npm run verify
 
+      - name: Windows signing status
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
+            Write-Warning "Aucun certificat Windows configuré : la Release continuera sans signature."
+          } else {
+            Write-Host "Certificat Windows configuré : electron-builder signera les exécutables."
+          }
+
       - name: Build Windows installer and updater metadata
         run: npm run dist
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Generate SHA-256
         shell: pwsh

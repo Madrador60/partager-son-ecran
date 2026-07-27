@@ -5,19 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Madrador Remote permet d'aider un proche ou un collègue à distance avec son autorisation.">
   <title>Madrador Remote — Assistance à distance simple et consentie</title>
-  <link rel="stylesheet" href="/site.css"><link rel="stylesheet" href="/release-notes.css">
+  <link rel="stylesheet" href="./site.css"><link rel="stylesheet" href="./release-notes.css">
 </head>
 <body>
   <header class="nav">
-    <a class="brand" href="/" aria-label="Accueil Madrador Remote">
-      <img src="/logo.png" alt="">
+    <a class="brand" href="./" aria-label="Accueil Madrador Remote">
+      <img src="./logo.png" alt="">
       <span>Madrador Remote</span>
     </a>
     <nav aria-label="Navigation principale">
       <a href="#fonctionnement">Fonctionnement</a>
       <a href="#securite">Sécurité</a>
-      <a href="/remote">Connexion web</a>
-      <a id="navDownload" class="nav-cta" href="/api/download/latest/windows">Télécharger</a>
+      <a href="./remote.html">Connexion web</a>
+      <a id="navDownload" class="nav-cta" href="#">Télécharger</a>
     </nav>
   </header>
 
@@ -28,8 +28,8 @@
         <h1>Aidez un écran distant, <em>en toute confiance.</em></h1>
         <p class="lead">Partage d’écran, contrôle clavier-souris, discussion et transfert de fichiers. Chaque connexion reste visible et doit être acceptée.</p>
         <div class="actions">
-          <a id="downloadButton" class="button primary" href="/api/download/latest/windows">Télécharger pour Windows</a>
-          <a class="button secondary" href="/remote">Se connecter depuis le web</a>
+          <a id="downloadButton" class="button primary" href="#">Télécharger pour Windows</a>
+          <a class="button secondary" href="./remote.html">Se connecter depuis le web</a>
         </div>
         <p id="releaseInfo" class="fine-print">Recherche de la dernière version…</p>
         <details id="releaseNotes" class="release-notes" hidden><summary>Notes de version</summary><div id="releaseNotesContent"></div></details>
@@ -82,10 +82,10 @@
   </main>
 
   <footer>
-    <a class="brand" href="/"><img src="/logo.png" alt=""><span>Madrador Remote</span></a>
+    <a class="brand" href="./"><img src="./logo.png" alt=""><span>Madrador Remote</span></a>
     <p>Une assistance distante claire, visible et consentie.</p>
     <span>© <span id="year"></span> Madrador Remote</span>
   </footer>
-  <script src="/site.js"></script>
+  <script src="./runtime-config.js"></script><script src="./site.js"></script>
 </body>
 </html>

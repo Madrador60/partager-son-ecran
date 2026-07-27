@@ -9,6 +9,8 @@ const os = require("node:os");
 const { pathToFileURL } = require("node:url");
 const { z } = require("zod");
 const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
+const { createTrustedIpc } = require("./src/main/ipc/trusted-ipc");
+const { createIceServers } = require("./src/server/turn/ice-config");
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let window;
@@ -21,11 +23,13 @@ let rendererReady = false;
 let lastUpdaterStatus = { status: "idle" };
 let remoteControl = { enabled: false, bounds: null };
 
-function assertTrusted(event) {
+function isTrusted(event) {
   const url = event.senderFrame?.url || "";
   const expected = pathToFileURL(path.join(__dirname, "public", "index.html")).href;
-  if (url !== expected) throw new Error("IPC_ORIGIN_DENIED");
+  return url === expected;
 }
+
+const trustedIpc = createTrustedIpc(ipcMain, isTrusted);
 
 function createWindow() {
   Menu.setApplicationMenu(null);
@@ -188,35 +192,49 @@ app.whenReady().then(() => {
 app.on("before-quit", () => { app.isQuiting = true; });
 app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
 
-ipcMain.handle("system-info", () => ({
-  hostname: os.hostname(),
-  displays: screen.getAllDisplays().length,
-  platform: os.platform(),
-  localIp: Object.values(os.networkInterfaces()).flat().find((item) => item?.family === "IPv4" && !item.internal)?.address || "Indisponible",
-  version: app.getVersion()
-}));
-ipcMain.handle("set-host-code", (event, code) => {
-  assertTrusted(event);
+trustedIpc.handle("system-info", async () => {
+  const gpu = await app.getGPUInfo("basic").catch(() => ({}));
+  return {
+    hostname: os.hostname(),
+    displays: screen.getAllDisplays().length,
+    platform: os.platform(),
+    platformRelease: os.release(),
+    localIp: Object.values(os.networkInterfaces()).flat().find((item) => item?.family === "IPv4" && !item.internal)?.address || "Indisponible",
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chromium: process.versions.chrome,
+    node: process.versions.node,
+    memoryBytes: os.totalmem(),
+    cpu: os.cpus()[0]?.model || "Indisponible",
+    cpuCores: os.cpus().length,
+    gpu: gpu.gpuDevice?.[0]?.deviceString || "Indisponible",
+    gpuFeatures: app.getGPUFeatureStatus()
+  };
+});
+trustedIpc.handle("set-host-code", (_event, code) => {
   currentHostCode = z.string().max(16).parse(code || "");
   tray?.rebuild();
   return { ok: true };
 });
-ipcMain.handle("set-session-active", (event, active) => {
-  assertTrusted(event);
+trustedIpc.handle("set-session-active", (_event, active) => {
   sessionActive = Boolean(active);
   tray?.rebuild();
   if (sessionActive && Notification.isSupported()) new Notification({ title: "Madrador Remote", body: "Une session distante est maintenant active.", icon: path.join(__dirname, "assets", "icon.ico") }).show();
   return { ok: true };
 });
-ipcMain.handle("show-notification", (event, payload = {}) => {
-  assertTrusted(event);
+trustedIpc.handle("set-availability", (_event, value) => {
+  available = Boolean(value);
+  tray?.rebuild();
+  sendToRenderer("availability-changed", available);
+  return { ok: true, available };
+});
+trustedIpc.handle("show-notification", (_event, payload = {}) => {
   const title = z.string().max(80).parse(payload.title || "Madrador Remote");
   const body = z.string().max(240).parse(payload.body || "");
   if (Notification.isSupported()) new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.ico") }).show();
   return { ok: true };
 });
-ipcMain.handle("update-action", async (event, action) => {
-  assertTrusted(event);
+trustedIpc.handle("update-action", async (_event, action) => {
   if (!app.isPackaged) return { ok: false, error: "Disponible dans la version installée" };
   if (action === "check") await checkForUpdates(true);
   else if (action === "download") await autoUpdater.downloadUpdate();
@@ -226,7 +244,7 @@ ipcMain.handle("update-action", async (event, action) => {
   return { ok: true };
 });
 
-ipcMain.handle("list-sources", async () => {
+trustedIpc.handle("list-sources", async () => {
   const displays = screen.getAllDisplays();
   const sources = await desktopCapturer.getSources({
     types: ["screen", "window"],
@@ -237,19 +255,27 @@ ipcMain.handle("list-sources", async () => {
     id: source.id,
     name: source.name,
     thumbnail: source.thumbnail.toDataURL(),
-    bounds: displays.find((display) => String(display.id) === source.display_id)?.bounds || null
+    bounds: displays.find((display) => String(display.id) === source.display_id)?.bounds || null,
+    display: (() => {
+      const display = displays.find((item) => String(item.id) === source.display_id);
+      return display ? {
+        id: String(display.id),
+        resolution: { width: display.size.width, height: display.size.height },
+        scaleFactor: display.scaleFactor,
+        rotation: display.rotation,
+        primary: display.id === screen.getPrimaryDisplay().id
+      } : null;
+    })()
   }));
 });
 
-ipcMain.handle("set-control-enabled", (event, value = {}) => {
-  assertTrusted(event);
+trustedIpc.handle("set-control-enabled", (_event, value = {}) => {
   value = ControlConfig.parse(value);
   remoteControl = { enabled: Boolean(value.enabled), bounds: value.bounds || null };
   return { ok: true };
 });
 
-ipcMain.handle("remote-input", async (event, payload = {}) => {
-  assertTrusted(event);
+trustedIpc.handle("remote-input", async (_event, payload = {}) => {
   payload = RemoteInput.parse(payload);
   if (!remoteControl.enabled) return { ok: false, error: "Contrôle non autorisé" };
   const { mouse, keyboard, Button, Key, Point } = require("@nut-tree-fork/nut-js");
@@ -270,14 +296,12 @@ ipcMain.handle("remote-input", async (event, payload = {}) => {
   return { ok: true };
 });
 
-ipcMain.handle("clipboard-read", () => clipboard.readText());
-ipcMain.handle("clipboard-write", (event, text) => {
-  assertTrusted(event);
+trustedIpc.handle("clipboard-read", () => clipboard.readText());
+trustedIpc.handle("clipboard-write", (_event, text) => {
   clipboard.writeText(z.string().max(100_000).parse(text));
   return { ok: true };
 });
-ipcMain.handle("save-file", async (event, file = {}) => {
-  assertTrusted(event);
+trustedIpc.handle("save-file", async (_event, file = {}) => {
   file = SaveFile.parse(file);
   const result = await dialog.showSaveDialog(window, { defaultPath: path.basename(String(file.name || "document")) });
   if (result.canceled || !result.filePath) return { ok: false };
@@ -286,11 +310,5 @@ ipcMain.handle("save-file", async (event, file = {}) => {
   await fs.writeFile(result.filePath, data);
   return { ok: true, path: result.filePath };
 });
-ipcMain.handle("get-signal-url", () => process.env.MADRADOR_SIGNAL_URL || "");
-ipcMain.handle("get-ice-servers", () => {
-  const servers = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }];
-  if (process.env.MADRADOR_TURN_URL && process.env.MADRADOR_TURN_USERNAME && process.env.MADRADOR_TURN_CREDENTIAL) {
-    servers.push({ urls: process.env.MADRADOR_TURN_URL, username: process.env.MADRADOR_TURN_USERNAME, credential: process.env.MADRADOR_TURN_CREDENTIAL });
-  }
-  return servers;
-});
+trustedIpc.handle("get-signal-url", () => process.env.MADRADOR_SIGNAL_URL || "");
+trustedIpc.handle("get-ice-servers", () => createIceServers());

@@ -1,0 +1,62 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "public/shared/**"
+      - "public/vendor/socket.io.min.js"
+      - "assets/logo.png"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - name: Prepare static website
+        env:
+          PUBLIC_API_URL: ${{ vars.MADRADOR_PUBLIC_API_URL }}
+          SIGNAL_URL: ${{ vars.MADRADOR_SIGNAL_URL }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site/shared _site/vendor
+          cp -R website/. _site/
+          cp public/shared/capabilities.js _site/shared/capabilities.js
+          cp public/vendor/socket.io.min.js _site/vendor/socket.io.min.js
+          cp assets/logo.png _site/logo.png
+          touch _site/.nojekyll
+          node -e 'const fs=require("fs"); const config={apiUrl:process.env.PUBLIC_API_URL||"",signalUrl:process.env.SIGNAL_URL||process.env.PUBLIC_API_URL||""}; for(const value of Object.values(config).filter(Boolean)){const url=new URL(value);if(url.protocol!=="https:")throw new Error("Les URL publiques doivent utiliser HTTPS");} fs.writeFileSync("_site/runtime-config.js",`window.MADRADOR_CONFIG=${JSON.stringify(config)};\n`);'
+          cp _site/remote.html _site/404.html
+          test -s _site/index.html
+          test -s _site/remote.html
+          test -s _site/runtime-config.js
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Published URL
+        run: echo "Madrador Remote publié sur ${{ steps.deployment.outputs.page_url }}"
