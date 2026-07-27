@@ -5,7 +5,7 @@ const fallback = document.getElementById("releaseFallback");
 const notes = document.getElementById("releaseNotes");
 const notesContent = document.getElementById("releaseNotesContent");
 const runtimeConfig = window.MADRADOR_CONFIG || {};
-const onStaticPages = location.hostname.endsWith("github.io");
+const onStaticPages = location.hostname === "madrador60.github.io";
 const apiUrl = String(runtimeConfig.apiUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
 const releaseEndpoint = apiUrl
   ? `${apiUrl}/api/releases/latest`

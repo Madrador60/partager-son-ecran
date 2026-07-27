@@ -16,6 +16,9 @@ function createIceServers(env = process.env, now = Date.now()) {
   const lifetimeSeconds = Math.min(3600, Math.max(300, Number(env.MADRADOR_TURN_TTL_SECONDS || 1800)));
   const expiresAt = Math.floor(now / 1000) + lifetimeSeconds;
   const username = `${expiresAt}:${String(env.MADRADOR_TURN_USERNAME).replace(/[^a-zA-Z0-9_.-]/g, "")}`;
+  // Coturn REST authentication requires HMAC-SHA1 by protocol. This is a
+  // short-lived message authentication code, not password hashing or encryption.
+  // lgtm[js/weak-cryptographic-algorithm]
   const credential = crypto.createHmac("sha1", env.MADRADOR_TURN_CREDENTIAL).update(username).digest("base64");
   iceServers.push({ urls, username, credential, credentialType: "password" });
   return iceServers;

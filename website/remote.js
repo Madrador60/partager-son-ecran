@@ -2,7 +2,7 @@ import { captureDisplay, detectPlatform } from "./shared/capabilities.js";
 
 const $ = (id) => document.getElementById(id);
 const runtimeConfig = window.MADRADOR_CONFIG || {};
-const onStaticPages = location.hostname.endsWith("github.io");
+const onStaticPages = location.hostname === "madrador60.github.io";
 const apiUrl = String(runtimeConfig.apiUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
 const signalUrl = String(runtimeConfig.signalUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
 const socket = signalUrl
