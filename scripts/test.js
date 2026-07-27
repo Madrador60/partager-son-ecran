@@ -5,6 +5,9 @@ const { spawnSync } = require("node:child_process");
 const { io: connect } = require("socket.io-client");
 const { SessionCode, ControlConfig, RemoteInput } = require("../src/shared/validation");
 const { normalize } = require("../src/services/github-releases");
+const { MemorySessionStore } = require("../src/server/sessions/memory-session-store");
+const { createIceServers } = require("../src/server/turn/ice-config");
+const { createTrustedIpc } = require("../src/main/ipc/trusted-ipc");
 
 const root = path.join(__dirname, "..");
 
@@ -38,6 +41,9 @@ async function run() {
   assert.ok(require("../package.json").build.files.includes("preload.js"));
   const webRemote = fs.readFileSync(path.join(root, "website", "remote.js"), "utf8");
   assert.match(webRemote, /captureDisplay/);
+  assert.match(webRemote, /MADRADOR_CONFIG/);
+  assert.doesNotMatch(webRemote, /fetch\("\/api\//);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, "website", "remote.html"), "utf8"), /(?:src|href)="\/(?!\/)/);
   assert.match(fs.readFileSync(path.join(root, "public", "shared", "capabilities.js"), "utf8"), /getDisplayMedia/);
   assert.equal(SessionCode.safeParse("123456789").success, true);
   assert.equal(SessionCode.safeParse("123").success, false);
@@ -55,6 +61,25 @@ async function run() {
   assert.equal(normalizedRelease.releaseNotes, "");
   assert.throws(() => normalize({ draft: true, assets: [] }), /RELEASE_INVALID/);
   assert.throws(() => normalize({ draft: false, assets: [] }), /INSTALLER_NOT_FOUND/);
+  const store = new MemorySessionStore();
+  await store.set("123456789", { pending: new Set() });
+  assert.equal(await store.has("123456789"), true);
+  assert.equal((await store.get("123456789")).pending instanceof Set, true);
+  await store.delete("123456789");
+  assert.equal(await store.has("123456789"), false);
+  const turn = createIceServers({
+    MADRADOR_TURN_URL: "turn:turn.example.test:3478?transport=udp,turns:turn.example.test:443?transport=tcp",
+    MADRADOR_TURN_USERNAME: "madrador",
+    MADRADOR_TURN_CREDENTIAL: "server-side-secret"
+  }, 0);
+  assert.equal(turn.length, 2);
+  assert.match(turn[1].username, /^\d+:madrador$/);
+  assert.notEqual(turn[1].credential, "server-side-secret");
+  let trustedListener;
+  const trustedIpc = createTrustedIpc({ handle: (_channel, listener) => { trustedListener = listener; } }, (event) => event.ok);
+  trustedIpc.handle("test", () => "ok");
+  await assert.rejects(() => trustedListener({ ok: false }), /IPC_ORIGIN_DENIED/);
+  assert.equal(await trustedListener({ ok: true }), "ok");
 
   process.env.PORT = "0";
   process.env.HOST = "127.0.0.1";
@@ -72,6 +97,9 @@ async function run() {
   assert.equal((await fetch(`${url}/release-notes.css`)).status, 200);
   assert.equal((await fetch(`${url}/remote`)).status, 200);
   assert.equal((await fetch(`${url}/remote.js`)).status, 200);
+  assert.equal((await fetch(`${url}/runtime-config.js`)).status, 200);
+  const corsResponse = await fetch(`${url}/api/ice`, { headers: { Origin: "http://localhost:3000" } });
+  assert.equal(corsResponse.headers.get("access-control-allow-origin"), "http://localhost:3000");
 
   const host = connect(url, { transports: ["websocket"], forceNew: true });
   const viewer = connect(url, { transports: ["websocket"], forceNew: true });
@@ -100,15 +128,15 @@ async function run() {
   viewer.emit("signal", { code: session.code, data: { type: "answer", sdp: { type: "answer", sdp: "test-viewer-answer" } } });
   assert.equal((await hostSignal).data.sdp.sdp, "test-viewer-answer");
 
-  const viewerLeft = once(host, "viewer-left");
+  const reconnecting = once(host, "peer-reconnecting");
   viewer.disconnect();
-  await viewerLeft;
+  await reconnecting;
   const recoveredViewer = connect(url, { transports: ["websocket"], forceNew: true });
   await once(recoveredViewer, "connect");
-  recoveredViewer.emit("viewer-request", { code: session.code, deviceName: "Recovered browser" });
-  const recoveredRequest = await once(host, "incoming-request");
-  host.emit("host-decision", { viewerSocketId: recoveredRequest.viewerSocketId, approved: true, permissions: { clipboard: true } });
-  assert.equal((await once(recoveredViewer, "viewer-approved")).code, session.code);
+  recoveredViewer.emit("resume-session", { code: session.code, resumeToken: approval.resumeToken, role: "viewer" });
+  const resumed = await once(recoveredViewer, "session-resumed");
+  assert.equal(resumed.code, session.code);
+  assert.equal(resumed.permissions.control, true);
 
   const limitedHost = connect(url, { transports: ["websocket"], forceNew: true });
   const rejectedViewer = connect(url, { transports: ["websocket"], forceNew: true });
@@ -121,10 +149,16 @@ async function run() {
   limitedHost.emit("host-decision", { viewerSocketId: rejectedRequest.viewerSocketId, approved: false });
   assert.match((await once(rejectedViewer, "viewer-denied")).reason, /refusée/i);
 
+  const unavailableHost = connect(url, { transports: ["websocket"], forceNew: true });
+  await once(unavailableHost, "connect");
+  unavailableHost.emit("host-create", { deviceName: "Unavailable", available: false });
+  assert.match((await once(unavailableHost, "host-unavailable")).reason, /indisponible/i);
+
   recoveredViewer.emit("end-session", { code: session.code });
   recoveredViewer.disconnect();
   limitedHost.disconnect();
   rejectedViewer.disconnect();
+  unavailableHost.disconnect();
   host.disconnect();
   await new Promise((resolve) => server.close(resolve));
   console.log("✓ Syntaxe, packaging, site, serveur et connexion de session validés.");

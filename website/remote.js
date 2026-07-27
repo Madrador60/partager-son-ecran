@@ -1,12 +1,18 @@
-import { captureDisplay, detectPlatform } from "/shared/capabilities.js";
+import { captureDisplay, detectPlatform } from "./shared/capabilities.js";
 
 const $ = (id) => document.getElementById(id);
-const socket = io({ transports: ["websocket", "polling"], timeout: 10000 });
+const runtimeConfig = window.MADRADOR_CONFIG || {};
+const onStaticPages = location.hostname.endsWith("github.io");
+const apiUrl = String(runtimeConfig.apiUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
+const signalUrl = String(runtimeConfig.signalUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
+const socket = signalUrl
+  ? io(signalUrl, { transports: ["websocket", "polling"], timeout: 10000 })
+  : io({ autoConnect: false });
 const platform = detectPlatform();
 const state = {
   role: null, peer: null, code: null, stream: null, permissions: {}, candidates: [],
   channels: {}, incomingFile: null, pendingViewer: null, statsTimer: null,
-  durationTimer: null, expiryTimer: null, startedAt: 0, zoom: 1
+  durationTimer: null, expiryTimer: null, startedAt: 0, zoom: 1, resumeToken: null
 };
 
 const formatCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ");
@@ -52,7 +58,8 @@ function startExpiry(expiresAt) {
   tick(); state.expiryTimer = setInterval(tick, 1000);
 }
 async function iceServers() {
-  const response = await fetch("/api/ice");
+  if (!apiUrl) return [{ urls: "stun:stun.l.google.com:19302" }];
+  const response = await fetch(`${apiUrl}/api/ice`);
   return response.ok ? (await response.json()).iceServers : [{ urls: "stun:stun.l.google.com:19302" }];
 }
 function bindChannel(channel) {
@@ -99,8 +106,10 @@ async function createPeer(isHost) {
       if (isHost) enterSession("Partage en cours");
       monitor(peer, isHost); toast("Connexion WebRTC établie");
     }
-    if (peer.connectionState === "failed") showError("La liaison WebRTC n’a pas pu être établie.");
-    if (["failed", "closed"].includes(peer.connectionState)) end(false);
+    if (peer.connectionState === "failed") {
+      setStatus("Reconnexion WebRTC en cours…");
+      peer.restartIce();
+    }
   };
   return peer;
 }
@@ -129,16 +138,19 @@ function end(emit = true) {
   if (emit && state.code) socket.emit("end-session", { code: state.code });
   clearInterval(state.statsTimer); clearInterval(state.durationTimer); clearInterval(state.expiryTimer);
   state.peer?.close(); state.stream?.getTracks().forEach((track) => track.stop());
-  Object.assign(state, { role: null, peer: null, code: null, stream: null, candidates: [], channels: {}, startedAt: 0 });
+  Object.assign(state, { role: null, peer: null, code: null, resumeToken: null, stream: null, candidates: [], channels: {}, startedAt: 0 });
   $("video").srcObject = null; $("hostPreview").srcObject = null; $("hostCodeArea").hidden = true;
   $("generateHostCode").disabled = true; $("regenerateHostCode").disabled = true; $("stopHosting").hidden = true;
   showOnly("modePanel"); setStatus("Serveur connecté");
 }
 
-socket.on("connect", () => { setStatus("Serveur connecté"); $("serverDot").classList.add("online"); });
+socket.on("connect", () => {
+  setStatus("Serveur connecté"); $("serverDot").classList.add("online");
+  if (state.code && state.resumeToken && state.role) socket.emit("resume-session", { code: state.code, resumeToken: state.resumeToken, role: state.role });
+});
 socket.on("disconnect", () => { setStatus("Reconnexion au serveur…"); $("serverDot").classList.remove("online"); });
-socket.on("host-created", ({ code, expiresAt }) => {
-  state.code = code; $("hostCode").textContent = formatCode(code); $("hostCodeArea").hidden = false;
+socket.on("host-created", ({ code, expiresAt, resumeToken }) => {
+  state.code = code; state.resumeToken = resumeToken; $("hostCode").textContent = formatCode(code); $("hostCodeArea").hidden = false;
   $("regenerateHostCode").disabled = false; $("stopHosting").hidden = false; startExpiry(expiresAt);
   toast("Code de partage créé");
 });
@@ -153,17 +165,34 @@ socket.on("viewer-ready", async () => {
   const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
   socket.emit("signal", { code: state.code, data: { type: "offer", sdp: peer.localDescription } });
 });
-socket.on("viewer-approved", async ({ code, permissions }) => {
-  state.code = code; state.permissions = permissions; await createPeer(false);
+socket.on("viewer-approved", async ({ code, permissions, resumeToken }) => {
+  state.code = code; state.resumeToken = resumeToken; state.permissions = permissions; await createPeer(false);
   setConnecting(true, "Autorisation reçue", "Négociation de la connexion WebRTC…");
 });
 socket.on("viewer-denied", ({ reason }) => showError(reason));
+socket.on("host-unavailable", ({ reason }) => showError(reason));
+socket.on("peer-reconnecting", () => setStatus("Reconnexion en cours…"));
+socket.on("peer-resumed", async () => {
+  setStatus("Connexion rétablie");
+  if (state.peer && state.role === "host") {
+    state.peer.restartIce();
+    const offer = await state.peer.createOffer({ iceRestart: true });
+    await state.peer.setLocalDescription(offer);
+    socket.emit("signal", { code: state.code, data: { type: "offer", sdp: state.peer.localDescription } });
+  }
+});
+socket.on("session-resumed", () => toast("Session reprise"));
+socket.on("resume-denied", () => { toast("La période de reprise est terminée."); end(false); });
 socket.on("permissions-state", (permissions) => { state.permissions = permissions; $("permissions").textContent = permissions.control ? "Contrôle autorisé" : "Lecture seule"; });
 socket.on("signal", ({ data }) => handleSignal(data).catch(() => showError("La négociation WebRTC a échoué.")));
 socket.on("chat-message", ({ text }) => addMessage(text, false));
 socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Presse-papiers synchronisé"); });
 socket.on("session-ended", () => end(false));
 socket.on("viewer-left", () => { toast("Le participant a quitté la session"); $("participants").innerHTML = "<small>Aucun participant connecté</small>"; showOnly("hostPanel"); });
+if (!signalUrl) {
+  setStatus("Serveur public à configurer");
+  $("capabilityNotice").textContent = "Le site est en ligne, mais les sessions distantes nécessitent encore l’URL du serveur public.";
+}
 
 $("openHost").onclick = () => { state.role = "host"; showOnly("hostPanel"); };
 $("openViewer").onclick = () => { state.role = "viewer"; showOnly("connectPanel"); };
@@ -180,7 +209,7 @@ $("selectDisplay").onclick = async () => {
 function createHostCode() {
   if (!state.stream) return toast("Choisissez d’abord un écran, une fenêtre ou un onglet.");
   state.permissions = webPermissions();
-  socket.emit("host-create", { deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim(), permissions: state.permissions, durationMinutes: Number($("webDuration").value) });
+  socket.emit("host-create", { deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim(), permissions: state.permissions, durationMinutes: Number($("webDuration").value), available: true });
   $("hostWaiting").textContent = "En attente d’une connexion…";
 }
 $("generateHostCode").onclick = createHostCode; $("regenerateHostCode").onclick = createHostCode;

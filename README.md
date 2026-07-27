@@ -42,6 +42,16 @@ La page `/remote` propose deux modes : **Partager mon PC** et **Se connecter à 
 
 Le navigateur ne peut pas devenir un agent Windows permanent, injecter des actions dans Windows quand il héberge une session, ni intercepter certains raccourcis système. L’interface désactive ces permissions et explique la limite. L’application reste nécessaire pour le contrôle complet et l’accès système.
 
+## Site public
+
+Le site est préparé pour être publié automatiquement avec GitHub Pages :
+
+https://madrador60.github.io/partager-son-ecran/
+
+La partie statique permet de télécharger l’application, partager un écran et rejoindre
+une session. Les connexions distantes dépendent du serveur public configuré dans les
+variables GitHub `MADRADOR_PUBLIC_API_URL` et `MADRADOR_SIGNAL_URL`.
+
 ## Fonctionnalités disponibles
 
 - code temporaire à neuf chiffres ;
@@ -195,6 +205,10 @@ Le workflow :
 Au démarrage, la version installée vérifie GitHub au maximum une fois toutes les six heures. Le bouton **Rechercher une mise à jour** ignore ce cache. `electron-updater` vérifie le SHA-512 déclaré dans `latest.yml` et l’application contrôle également le SHA-256 publié lorsqu’il est disponible. Une mise à jour téléchargée peut être installée immédiatement ou automatiquement à la fermeture de l’application.
 
 > Pour éviter les avertissements SmartScreen et obtenir une chaîne de confiance comparable aux logiciels commerciaux, configurez ensuite un certificat de signature de code Windows dans les secrets GitHub Actions. Le mécanisme de mise à jour fonctionne sans ce certificat, mais Windows affichera davantage d’avertissements.
+
+La signature reste facultative : si `WIN_CSC_LINK` et `WIN_CSC_KEY_PASSWORD` sont
+absents, la compilation et la publication continuent avec un avertissement dans les
+logs. Le téléchargement direct et `electron-updater` ne dépendent pas du certificat.
 
 ## Sécurité
 

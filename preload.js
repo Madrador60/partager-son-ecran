@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("remoteAssist", Object.freeze({
   getIceServers: () => ipcRenderer.invoke("get-ice-servers"),
   setHostCode: (code) => ipcRenderer.invoke("set-host-code", code),
   setSessionActive: (active) => ipcRenderer.invoke("set-session-active", active),
+  setAvailability: (available) => ipcRenderer.invoke("set-availability", available),
   showNotification: (payload) => ipcRenderer.invoke("show-notification", payload),
   updateAction: (action) => ipcRenderer.invoke("update-action", action),
   onAvailabilityChanged: (callback) => ipcRenderer.on("availability-changed", (_event, value) => callback(value)),

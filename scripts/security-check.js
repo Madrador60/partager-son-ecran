@@ -8,7 +8,8 @@ const checks = [
   ["server/index.js", /X-Content-Type-Options/, "en-têtes HTTP"],
   ["server/index.js", /helmet\(/, "Helmet"],
   ["server/index.js", /PUBLIC_ORIGIN est obligatoire/, "origine obligatoire en production"],
-  ["main.js", /assertTrusted/, "origine IPC"],
+  ["main.js", /createTrustedIpc/, "middleware IPC central"],
+  ["src/main/ipc/trusted-ipc.js", /IPC_ORIGIN_DENIED/, "refus IPC non fiable"],
   ["main.js", /RemoteInput\.parse/, "validation IPC"],
   ["server/index.js", /sessionFor\(socket,\s*code\)/, "appartenance aux sessions"],
   ["server/index.js", /permissions\.control/, "permission de contrôle"],
@@ -21,4 +22,8 @@ for (const [file, pattern, label] of checks) {
   console.log(`${ok ? "✓" : "✗"} ${label}`);
   failed ||= !ok;
 }
+const mainSource = fs.readFileSync("main.js", "utf8");
+const directIpc = /ipcMain\.(?:handle|on)\s*\(/.test(mainSource);
+console.log(`${directIpc ? "✗" : "✓"} aucun handler IPC hors middleware`);
+failed ||= directIpc;
 if (failed) process.exitCode = 1;

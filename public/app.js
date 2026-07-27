@@ -28,7 +28,9 @@ const state = {
   zoom: 1,
   pendingFileOffer: null,
   update: { status: "idle" }
+  , available: true, resumeToken: null, role: null
 };
+let systemDiagnostics = null;
 
 function notify(message, type = "info", title = "Madrador Remote") {
   const toast = document.createElement("div");
@@ -158,7 +160,11 @@ async function createPeer(isHost) {
       showPanel("session");
       monitorStats(peer);
     }
-    if (["failed", "closed"].includes(peer.connectionState)) stopSession(false);
+    if (peer.connectionState === "failed") {
+      $("sessionState").textContent = "Reconnexion en cours";
+      notify("La liaison est interrompue. Tentative de reprise…", "info", "Reconnexion");
+      peer.restartIce();
+    }
   };
   if (!isHost) {
     peer.ontrack = ({ streams }) => {
@@ -220,14 +226,19 @@ function bindSocket(socket) {
     $("onlineDot").classList.add("online");
     $("connectionLabel").textContent = "Serveur connecté";
     $("deviceStatus").textContent = "Prêt à recevoir";
+    if (state.sessionCode && state.resumeToken && state.role) {
+      socket.emit("resume-session", { code: state.sessionCode, resumeToken: state.resumeToken, role: state.role });
+    }
   });
   socket.on("disconnect", () => {
     $("onlineDot").classList.remove("online");
     $("connectionLabel").textContent = "Serveur hors ligne";
   });
   socket.on("connect_error", () => notify("Serveur inaccessible. Nouvelle tentative automatique.", "error"));
-  socket.on("host-created", ({ code, expiresAt }) => {
+  socket.on("host-created", ({ code, expiresAt, resumeToken }) => {
     state.sessionCode = code;
+    state.resumeToken = resumeToken;
+    state.role = "host";
     $("localCode").textContent = formatCode(code);
     $("copyCode").disabled = false;
     $("codeState").textContent = "Code actif";
@@ -251,14 +262,33 @@ function bindSocket(socket) {
     $("requestDialog").showModal();
     bridge.showNotification({ title: "Demande de connexion", body: `${deviceName || "Un ordinateur"} souhaite se connecter.` });
   });
-  socket.on("viewer-approved", async ({ code, permissions }) => {
+  socket.on("viewer-approved", async ({ code, permissions, resumeToken }) => {
     state.remoteCode = code;
+    state.sessionCode = code;
+    state.resumeToken = resumeToken;
+    state.role = "viewer";
     state.permissions = permissions;
     await createPeer(false);
     $("remoteName").textContent = "Appareil distant";
     notify("Demande acceptée", "success");
   });
   socket.on("viewer-denied", ({ reason }) => { notify(reason, "error", "Connexion refusée"); addHistory({ device: formatCode(state.remoteCode), code: state.remoteCode, type: "Sortante", status: "failed" }); });
+  socket.on("host-unavailable", ({ reason }) => notify(reason, "error", "Appareil indisponible"));
+  socket.on("peer-reconnecting", () => notify("Connexion interrompue. Reprise automatique en cours…", "info", "Reconnexion"));
+  socket.on("peer-resumed", async () => {
+    notify("Connexion rétablie", "success");
+    if (state.peer && state.role === "host") {
+      state.peer.restartIce();
+      const offer = await state.peer.createOffer({ iceRestart: true });
+      await state.peer.setLocalDescription(offer);
+      socket.emit("signal", { code: activeCode(), data: { type: "offer", sdp: state.peer.localDescription } });
+    }
+  });
+  socket.on("session-resumed", () => notify("Session reprise", "success"));
+  socket.on("resume-denied", () => {
+    notify("La période de reprise est terminée.", "error", "Session expirée");
+    stopSession(false);
+  });
   socket.on("viewer-ready", async () => {
     if (!state.stream) return notify("Sélectionnez d’abord un écran", "error");
     const peer = await createPeer(true);
@@ -330,7 +360,7 @@ async function stopSession(shouldNotify = true) {
   state.stream?.getTracks().forEach((track) => track.stop());
   state.peer?.close();
   await bridge.setControlEnabled({ enabled: false, bounds: null });
-  Object.assign(state, { peer: null, stream: null, remoteCode: null, selectedBounds: null, candidateQueue: [] });
+  Object.assign(state, { peer: null, stream: null, sessionCode: null, remoteCode: null, resumeToken: null, role: null, selectedBounds: null, candidateQueue: [] });
   state.channels = {};
   state.incomingFile = null;
   $("remoteVideo").srcObject = null;
@@ -419,6 +449,7 @@ async function init() {
   if (!bridge) throw new Error("API Electron indisponible");
   document.body.dataset.platform = platform.kind;
   const info = await bridge.systemInfo();
+  systemDiagnostics = info;
   $("deviceLabel").textContent = `${info.hostname} · ${info.displays} écran(s)`;
   $("computerName").textContent = info.hostname;
   $("sidebarDevice").textContent = info.hostname;
@@ -440,7 +471,7 @@ async function init() {
   $("createSession").onclick = () => {
     if (!state.stream) return notify("Choisissez d’abord un écran", "error");
     state.permissions = activePermissions();
-    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions, durationMinutes: Number($("sessionDurationSelect").value) });
+    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions, durationMinutes: Number($("sessionDurationSelect").value), available: state.available });
     notify("Création du code…");
   };
   $("connect").onclick = () => {
@@ -525,19 +556,43 @@ async function init() {
   $("clearRecents").onclick = () => { localStorage.removeItem(RECENTS_KEY); renderRecents(); };
   $("historySearch").oninput = renderHistory;
   $("historyFilter").onchange = renderHistory;
-  $("availability").onclick = () => {
+  $("availability").onclick = async () => {
     const off = $("availability").classList.toggle("off");
+    state.available = !off;
     $("availability").querySelector("span").textContent = off ? "Indisponible" : "Disponible";
     $("availabilityText").textContent = off ? "Indisponible" : "Disponible";
+    await bridge.setAvailability(state.available);
+    if (state.sessionCode) state.socket.emit("host-availability", { code: state.sessionCode, available: state.available });
   };
   $("rejectFile").onclick = () => decideFile(false);
   $("acceptFile").onclick = () => decideFile(true);
   bridge.onStopConnections(() => stopSession());
   bridge.onAvailabilityChanged((value) => {
+    state.available = value;
     $("availability").classList.toggle("off", !value);
     $("availability").querySelector("span").textContent = value ? "Disponible" : "Indisponible";
     $("availabilityText").textContent = value ? "Disponible" : "Indisponible";
+    if (state.sessionCode) state.socket.emit("host-availability", { code: state.sessionCode, available: value });
   });
+  const renderDiagnostics = async () => {
+    const details = await bridge.systemInfo();
+    systemDiagnostics = {
+      generatedAt: new Date().toISOString(),
+      application: { version: details.version, electron: details.electron, chromium: details.chromium, node: details.node },
+      system: { platform: details.platform, release: details.platformRelease, memoryBytes: details.memoryBytes, cpu: details.cpu, cpuCores: details.cpuCores, gpu: details.gpu, gpuFeatures: details.gpuFeatures },
+      connection: { server: $("serverDisplay").textContent, socketIo: state.socket?.connected ? "connected" : "disconnected", webrtc: state.peer?.connectionState || "inactive", ice: state.peer?.iceConnectionState || "inactive" },
+      media: { resolution: state.stream?.getVideoTracks()[0]?.getSettings?.() || null }
+    };
+    $("diagnosticsReport").textContent = JSON.stringify(systemDiagnostics, null, 2);
+  };
+  $("refreshDiagnostics").onclick = () => renderDiagnostics().catch(() => notify("Diagnostics indisponibles", "error"));
+  $("exportDiagnostics").onclick = async () => {
+    await renderDiagnostics();
+    const data = new TextEncoder().encode(JSON.stringify(systemDiagnostics, null, 2));
+    const result = await bridge.saveReceivedFile({ name: `madrador-diagnostics-${Date.now()}.json`, data });
+    notify(result.ok ? "Rapport de diagnostic exporté" : "Export annulé", result.ok ? "success" : "info");
+  };
+  await renderDiagnostics();
   bridge.onUpdaterStatus(updateUpdater);
   bridge.onOpenUpdateDialog(() => $("updateDialog").showModal());
   $("updateButton").onclick = () => bridge.updateAction($("updateButton").dataset.action || "check").then((result) => {

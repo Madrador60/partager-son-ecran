@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
-  <title>Madrador Remote — Partager ou se connecter</title><link rel="stylesheet" href="/remote.css"><link rel="stylesheet" href="/remote-state.css"><link rel="stylesheet" href="/share.css">
+  <title>Madrador Remote — Partager ou se connecter</title><link rel="stylesheet" href="./remote.css"><link rel="stylesheet" href="./remote-state.css"><link rel="stylesheet" href="./share.css">
 </head>
 <body>
   <div class="ambient a"></div><div class="ambient b"></div>
-  <header class="remote-nav"><a href="/" class="brand"><span><img src="/logo.png" alt=""></span><b>Madrador <em>Remote</em></b></a><div class="server-state"><i id="serverDot"></i><b id="status">Connexion au serveur…</b></div><button id="leave" disabled>Quitter la session</button></header>
+  <header class="remote-nav"><a href="./" class="brand"><span><img src="./logo.png" alt=""></span><b>Madrador <em>Remote</em></b></a><div class="server-state"><i id="serverDot"></i><b id="status">Connexion au serveur…</b></div><button id="leave" disabled>Quitter la session</button></header>
   <main class="remote-shell">
     <section id="modePanel" class="mode-panel">
       <div class="mode-heading"><span class="eyebrow">MADRADOR REMOTE WEB</span><h1>Que souhaitez-vous faire ?</h1><p>Partagez votre écran ou rejoignez un appareil avec la même connexion WebRTC sécurisée.</p></div>
@@ -55,7 +55,7 @@
         <button id="connect"><span>Connexion sécurisée</span><b>→</b></button>
         <div id="connectionProgress" class="connection-progress" hidden><i></i><div><b id="progressTitle">Demande envoyée</b><small id="progressDetail">En attente de l’autorisation du PC distant…</small></div><button id="cancelConnect">Annuler</button></div>
         <div id="connectError" class="connect-error" hidden><b>Connexion impossible</b><span id="errorDetail"></span><button id="retryConnect">Réessayer</button></div>
-        <footer><span>Compatible Chrome, Edge et Firefox récents</span><a href="/#download">Installer l’application</a></footer>
+        <footer><span>Compatible Chrome, Edge et Firefox récents</span><a href="./#download">Installer l’application</a></footer>
       </div>
     </section>
 
@@ -81,5 +81,5 @@
   </main>
   <dialog id="webRequestDialog"><div class="web-request"><span class="mode-icon">💻</span><span class="eyebrow">DEMANDE DE CONNEXION</span><h2 id="webRequester">Un appareil souhaite se connecter</h2><p>Vous restez maître de la session et pouvez l’arrêter à tout moment.</p><div><button id="webDeny">Refuser</button><button id="webAccept">Accepter</button></div></div></dialog>
   <div id="toasts" aria-live="polite"></div>
-  <script src="/socket.io/socket.io.js"></script><script type="module" src="/remote.js"></script>
+  <script src="./runtime-config.js"></script><script src="./vendor/socket.io.min.js"></script><script type="module" src="./remote.js"></script>
 </body></html>
