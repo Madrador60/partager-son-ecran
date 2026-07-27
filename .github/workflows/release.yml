@@ -99,7 +99,7 @@ jobs:
           if ($checksum -notmatch '^[a-f0-9]{64}$') { throw "Checksum SHA-256 invalide." }
 
       - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           target_commitish: ${{ github.sha }}
