@@ -11,6 +11,7 @@ const { z } = require("zod");
 const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
 const { createTrustedIpc } = require("./src/main/ipc/trusted-ipc");
 const { createIceServers } = require("./src/server/turn/ice-config");
+const { startEmbeddedServer, stopEmbeddedServer } = require("./src/main/embedded-server");
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let window;
@@ -22,6 +23,7 @@ let sessionActive = false;
 let rendererReady = false;
 let lastUpdaterStatus = { status: "idle" };
 let remoteControl = { enabled: false, bounds: null };
+let embeddedServer = null;
 
 function isTrusted(event) {
   const url = event.senderFrame?.url || "";
@@ -184,12 +186,19 @@ async function verifyOptionalSha256(info) {
 }
 
 app.setAppUserModelId("com.madrador.remote");
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  embeddedServer = await startEmbeddedServer();
   createWindow();
   createTray();
   configureUpdater();
+}).catch((error) => {
+  console.error("Embedded server startup:", error.message);
+  app.quit();
 });
-app.on("before-quit", () => { app.isQuiting = true; });
+app.on("before-quit", () => {
+  app.isQuiting = true;
+  stopEmbeddedServer(embeddedServer).catch(() => {});
+});
 app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
 
 trustedIpc.handle("system-info", async () => {
@@ -310,5 +319,6 @@ trustedIpc.handle("save-file", async (_event, file = {}) => {
   await fs.writeFile(result.filePath, data);
   return { ok: true, path: result.filePath };
 });
-trustedIpc.handle("get-signal-url", () => process.env.MADRADOR_SIGNAL_URL || "");
+trustedIpc.handle("get-signal-url", () => process.env.MADRADOR_SIGNAL_URL || embeddedServer?.url || "");
+trustedIpc.handle("get-embedded-signal-url", () => embeddedServer?.url || "");
 trustedIpc.handle("get-ice-servers", () => createIceServers());
