@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("remoteAssist", Object.freeze({
   clipboardWrite: (text) => ipcRenderer.invoke("clipboard-write", text),
   saveReceivedFile: (file) => ipcRenderer.invoke("save-file", file),
   getSignalUrl: () => ipcRenderer.invoke("get-signal-url"),
+  getEmbeddedSignalUrl: () => ipcRenderer.invoke("get-embedded-signal-url"),
   getIceServers: () => ipcRenderer.invoke("get-ice-servers"),
   setHostCode: (code) => ipcRenderer.invoke("set-host-code", code),
   setSessionActive: (active) => ipcRenderer.invoke("set-session-active", active),

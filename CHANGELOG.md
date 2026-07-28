@@ -12,6 +12,8 @@
 - première version publique de Madrador Remote.
 # Changements non publiés
 
+- serveur Socket.IO/API intégré démarré automatiquement avec l’application ;
+- empaquetage du serveur, du stockage de sessions et des fichiers web dans l’EXE ;
 - validation centralisée de tous les handlers IPC Electron ;
 - mode Disponible/Indisponible appliqué par le serveur ;
 - jetons cryptographiques et période de grâce pour reprendre une session ;

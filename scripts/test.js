@@ -8,6 +8,7 @@ const { normalize } = require("../src/services/github-releases");
 const { MemorySessionStore } = require("../src/server/sessions/memory-session-store");
 const { createIceServers } = require("../src/server/turn/ice-config");
 const { createTrustedIpc } = require("../src/main/ipc/trusted-ipc");
+const { isMadradorServer } = require("../src/main/embedded-server");
 
 const root = path.join(__dirname, "..");
 
@@ -90,6 +91,7 @@ async function run() {
   const response = await fetch(`${url}/api/health`);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).ok, true);
+  assert.equal(await isMadradorServer(url), true);
   const siteResponse = await fetch(url);
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
@@ -100,6 +102,9 @@ async function run() {
   assert.equal((await fetch(`${url}/runtime-config.js`)).status, 200);
   const corsResponse = await fetch(`${url}/api/ice`, { headers: { Origin: "http://localhost:3000" } });
   assert.equal(corsResponse.headers.get("access-control-allow-origin"), "http://localhost:3000");
+  const packagedFiles = require("../package.json").build.files;
+  assert.ok(packagedFiles.includes("server/**/*"));
+  assert.ok(packagedFiles.includes("src/server/**/*"));
 
   const host = connect(url, { transports: ["websocket"], forceNew: true });
   const viewer = connect(url, { transports: ["websocket"], forceNew: true });

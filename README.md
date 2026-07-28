@@ -8,6 +8,11 @@
 
 Application Windows d’assistance à distance visible et consentie. Madrador Remote permet de partager un écran, contrôler un poste autorisé, discuter et échanger des fichiers ou du texte.
 
+L’application démarre automatiquement un serveur de signalisation intégré en
+arrière-plan. Pour les essais locaux ou sur un même ordinateur, aucune commande
+`npm run server` n’est nécessaire. Un serveur public commun reste nécessaire pour
+relier automatiquement deux réseaux Internet différents.
+
 > **Projet en développement.** Madrador Remote est actuellement un MVP Windows. Il ne remplace pas encore un service commercial comme AnyDesk, ne garantit aucune latence nulle et ne doit jamais être utilisé sans consentement.
 
 ## Télécharger
@@ -165,6 +170,11 @@ Variables principales :
 | `MADRADOR_TURN_CREDENTIAL` | Secret TURN |
 
 Pour une utilisation entre deux réseaux différents, configurez impérativement HTTPS et un serveur TURN. Un serveur STUN seul ne garantit pas la connexion.
+
+Sans `MADRADOR_SIGNAL_URL`, l’application utilise automatiquement son serveur intégré
+sur `127.0.0.1:3000`. Si une autre instance Madrador utilise déjà ce port sur le même
+ordinateur, elle rejoint ce serveur existant. Si le port appartient à un autre
+programme, l’application choisit automatiquement un port libre.
 
 ## Tests et création de l’installeur
 

@@ -9,7 +9,7 @@
     "server": "node server/index.js",
     "build": "electron-builder --win nsis",
     "dist": "npm run build",
-    "check": "node --check main.js && node --check preload.js && node --check server/index.js && node --check src/main/ipc/trusted-ipc.js && node --check src/server/sessions/create-session-store.js && node --check src/server/sessions/memory-session-store.js && node --check src/server/sessions/redis-session-store.js && node --check src/server/turn/ice-config.js && node --check src/shared/validation.js && node --check src/services/github-releases.js && node --check public/app.js && node --check website/site.js && node --check website/remote.js",
+    "check": "node --check main.js && node --check preload.js && node --check server/index.js && node --check src/main/ipc/trusted-ipc.js && node --check src/main/embedded-server.js && node --check src/server/sessions/create-session-store.js && node --check src/server/sessions/memory-session-store.js && node --check src/server/sessions/redis-session-store.js && node --check src/server/turn/ice-config.js && node --check src/shared/validation.js && node --check src/services/github-releases.js && node --check public/app.js && node --check website/site.js && node --check website/remote.js",
     "update-safe": "npm audit fix",
     "verify": "npm run check && npm test && npm run test:security",
     "test:security": "node scripts/security-check.js",
@@ -42,9 +42,13 @@
     "files": [
       "main.js",
       "preload.js",
+      "server/**/*",
       "src/main/**/*",
+      "src/server/**/*",
+      "src/services/**/*",
       "src/shared/**/*",
       "public/**/*",
+      "website/**/*",
       "assets/**/*",
       "package.json"
     ],

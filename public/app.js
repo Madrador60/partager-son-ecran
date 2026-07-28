@@ -458,7 +458,8 @@ async function init() {
   $("installedVersion").textContent = `v${info.version}`;
   $("sidebarVersion").textContent = `Version ${info.version}`;
   $("aboutVersion").textContent = `Version ${info.version}`;
-  const configured = localStorage.getItem(SERVER_KEY) || await bridge.getSignalUrl() || "http://127.0.0.1:3000";
+  const configured = localStorage.getItem(SERVER_KEY) || await bridge.getSignalUrl();
+  if (!configured) throw new Error("Le serveur intégré n’a pas pu démarrer.");
   $("serverUrl").value = configured;
   $("serverDisplay").textContent = new URL(configured).host;
   $("sidebarServer").textContent = new URL(configured).host;
