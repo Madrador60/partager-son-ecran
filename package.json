@@ -22,7 +22,7 @@
     "@nut-tree-fork/nut-js": "^4.2.2",
     "dotenv": "^16.6.1",
     "electron-updater": "^6.8.9",
-    "express": "^4.21.2",
+    "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
     "helmet": "^8.3.0",
     "redis": "^5.12.1",
