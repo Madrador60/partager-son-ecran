@@ -211,7 +211,7 @@ io.on("connection", (socket) => {
     await sessions.set(sessionCode, session);
     socketSession.set(viewerSocketId, sessionCode);
     viewer.join(sessionCode);
-    io.to(viewerSocketId).emit("viewer-approved", { code: sessionCode, permissions: session.permissions, resumeToken: session.viewerResumeToken });
+    io.to(viewerSocketId).emit("viewer-approved", { code: sessionCode, permissions: session.permissions, resumeToken: session.viewerResumeToken, deviceName: session.deviceName });
     io.to(session.host).emit("viewer-ready");
   });
 

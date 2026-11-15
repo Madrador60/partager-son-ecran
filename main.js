@@ -25,6 +25,8 @@ let rendererReady = false;
 let lastUpdaterStatus = { status: "idle" };
 let remoteControl = { enabled: false, bounds: null };
 let embeddedServer = null;
+let preferences = { notifications: true, launchAtStartup: false };
+const startHidden = process.argv.includes("--hidden");
 
 // Serveur public partagé par tous les utilisateurs : indispensable pour relier
 // deux PC sur des réseaux Internet différents. Injecté au build (package.json →
@@ -48,9 +50,23 @@ function isTrusted(event) {
 
 const trustedIpc = createTrustedIpc(ipcMain, isTrusted);
 
+function notifyUser(title, body, onClick) {
+  if (!preferences.notifications || !Notification.isSupported()) return;
+  const notification = new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.ico") });
+  if (onClick) notification.on("click", onClick);
+  notification.show();
+}
+
+function showMainWindow() {
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
 function createWindow() {
   Menu.setApplicationMenu(null);
-  splash = new BrowserWindow({
+  if (!startHidden) splash = new BrowserWindow({
     width: 460,
     height: 300,
     frame: false,
@@ -60,7 +76,7 @@ function createWindow() {
     resizable: false,
     webPreferences: { contextIsolation: true, sandbox: true }
   });
-  splash.loadFile(path.join(__dirname, "public", "splash.html"), { query: { version: app.getVersion() } });
+  splash?.loadFile(path.join(__dirname, "public", "splash.html"), { query: { version: app.getVersion() } });
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -80,6 +96,7 @@ function createWindow() {
   window.once("ready-to-show", () => {
     splash?.close();
     splash = null;
+    if (startHidden) return;
     window.maximize();
     window.show();
   });
@@ -112,7 +129,7 @@ function createTray() {
   const rebuild = () => {
     tray.setToolTip(`Madrador Remote — ${sessionActive ? "Session active" : available ? "Disponible" : "Indisponible"}`);
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Ouvrir Madrador Remote", click: () => { window.show(); window.focus(); } },
+      { label: "Ouvrir Madrador Remote", click: showMainWindow },
       { label: currentHostCode ? `Copier mon ID · ${currentHostCode}` : "Copier mon ID", enabled: Boolean(currentHostCode), click: () => clipboard.writeText(currentHostCode) },
       { type: "separator" },
       { label: "Disponible", type: "checkbox", checked: available, click: (item) => { available = item.checked; sendToRenderer("availability-changed", available); rebuild(); } },
@@ -121,7 +138,7 @@ function createTray() {
       { label: "Quitter", click: () => { app.isQuiting = true; app.quit(); } }
     ]));
   };
-  tray.on("double-click", () => { window.show(); window.focus(); });
+  tray.on("double-click", showMainWindow);
   tray.rebuild = rebuild;
   rebuild();
 }
@@ -156,11 +173,7 @@ function configureUpdater() {
   autoUpdater.on("checking-for-update", () => publishUpdaterStatus("checking"));
   autoUpdater.on("update-available", (info) => {
     publishUpdaterStatus("available", { version: info.version, notes: info.releaseNotes || "" });
-    if (Notification.isSupported()) {
-      const notification = new Notification({ title: "Nouvelle version disponible", body: `Madrador Remote ${info.version} est disponible.`, icon: path.join(__dirname, "assets", "icon.ico") });
-      notification.on("click", () => { window.show(); window.focus(); sendToRenderer("open-update-dialog"); });
-      notification.show();
-    }
+    notifyUser("Nouvelle version disponible", `Madrador Remote ${info.version} est disponible.`, () => { showMainWindow(); sendToRenderer("open-update-dialog"); });
   });
   autoUpdater.on("update-not-available", (info) => publishUpdaterStatus("current", { version: info.version }));
   autoUpdater.on("download-progress", (progress) => {
@@ -201,6 +214,9 @@ async function verifyOptionalSha256(info) {
 }
 
 app.setAppUserModelId("com.madrador.remote");
+// Une seule instance : relancer l'application ramène simplement la fenêtre existante.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on("second-instance", showMainWindow);
 app.whenReady().then(async () => {
   embeddedServer = await startEmbeddedServer();
   createWindow();
@@ -243,7 +259,7 @@ trustedIpc.handle("set-host-code", (_event, code) => {
 trustedIpc.handle("set-session-active", (_event, active) => {
   sessionActive = Boolean(active);
   tray?.rebuild();
-  if (sessionActive && Notification.isSupported()) new Notification({ title: "Madrador Remote", body: "Une session distante est maintenant active.", icon: path.join(__dirname, "assets", "icon.ico") }).show();
+  if (sessionActive) notifyUser("Madrador Remote", "Une session distante est maintenant active.");
   return { ok: true };
 });
 trustedIpc.handle("set-availability", (_event, value) => {
@@ -255,7 +271,31 @@ trustedIpc.handle("set-availability", (_event, value) => {
 trustedIpc.handle("show-notification", (_event, payload = {}) => {
   const title = z.string().max(80).parse(payload.title || "Madrador Remote");
   const body = z.string().max(240).parse(payload.body || "");
-  if (Notification.isSupported()) new Notification({ title, body, icon: path.join(__dirname, "assets", "icon.ico") }).show();
+  notifyUser(title, body, showMainWindow);
+  return { ok: true };
+});
+trustedIpc.handle("set-preferences", (_event, value = {}) => {
+  preferences = z.object({ notifications: z.boolean(), launchAtStartup: z.boolean() }).strict().parse(value);
+  // En développement, cela enregistrerait electron.exe : on ne le fait que dans la version installée.
+  if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: preferences.launchAtStartup, args: ["--hidden"] });
+  return { ok: true, applied: app.isPackaged };
+});
+trustedIpc.handle("test-server", async (_event, value) => {
+  try {
+    const url = new URL(z.string().max(500).parse(value));
+    if (!["http:", "https:"].includes(url.protocol)) return { ok: false, error: "Adresse http(s) attendue." };
+    const started = Date.now();
+    // Délai long : un serveur gratuit en veille met jusqu'à une minute à démarrer.
+    const response = await fetch(new URL("/api/health", url.origin), { signal: AbortSignal.timeout(70_000) });
+    const body = response.ok ? await response.json().catch(() => null) : null;
+    if (body?.service !== "madrador-signal") return { ok: false, error: "Ce n’est pas un serveur Madrador Remote." };
+    return { ok: true, ms: Date.now() - started };
+  } catch (error) {
+    return { ok: false, error: error.name === "TimeoutError" ? "Pas de réponse du serveur." : "Adresse injoignable." };
+  }
+});
+trustedIpc.handle("focus-window", () => {
+  showMainWindow();
   return { ok: true };
 });
 trustedIpc.handle("update-action", async (_event, action) => {
