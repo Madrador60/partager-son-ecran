@@ -36,6 +36,9 @@
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
     <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 6 6M22 9l-6 6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
   </svg>
 
@@ -90,6 +93,7 @@
                       <span id="sourceEmpty" class="source-empty"><svg class="i"><use href="#i-screen"/></svg>Choisir un écran ou une fenêtre</span>
                     </button>
                     <small id="sourceName" class="muted"></small>
+                    <label class="perm"><input id="permAudio" type="checkbox"><span class="perm-ico"><svg class="i"><use href="#i-volume"/></svg></span><span><b>Partager aussi le son de l’ordinateur</b><small>Vidéos, alertes, musique : utile pour un problème de son.</small></span><span class="switch"></span></label>
                   </div>
                 </li>
                 <li>
@@ -193,6 +197,11 @@
                   <button role="menuitem" data-combo="lock" type="button">Win + L (Verrouiller)</button>
                 </div>
               </div>
+              <div class="menu-wrap" id="screensWrap" hidden>
+                <button id="screensButton" class="tool" type="button" aria-haspopup="menu" aria-expanded="false" title="Choisir l’écran distant"><svg class="i"><use href="#i-screen"/></svg><span>Écran</span></button>
+                <div id="screensMenu" class="menu" role="menu" hidden></div>
+              </div>
+              <button id="toggleSound" class="tool" type="button" aria-pressed="true" title="Couper ou activer le son" hidden><svg class="i"><use href="#i-volume"/></svg><span>Son</span></button>
               <span class="tool-sep"></span>
               <button id="zoomFit" class="tool" type="button" aria-pressed="true" title="Ajuster à la fenêtre"><svg class="i"><use href="#i-fit"/></svg></button>
               <button id="zoomOut" class="tool" type="button" title="Réduire"><svg class="i"><use href="#i-minus"/></svg></button>
@@ -222,6 +231,7 @@
           <header class="session-bar">
             <div class="peer"><span class="live-badge"><i></i>En direct</span><span><b>Votre écran est partagé avec <span id="hostPeerName">un ordinateur</span></b><small><span id="hostSessionStatus">Connexion…</span> · <span id="hostSessionTimer">00:00:00</span></small></span></div>
             <div class="toolbar">
+              <button id="hostChangeScreen" class="tool" type="button" title="Partager un autre écran ou une autre fenêtre"><svg class="i"><use href="#i-screen"/></svg><span>Changer d’écran</span></button>
               <button class="tool" data-panel="chat" type="button" title="Discussion"><svg class="i"><use href="#i-chat"/></svg><span>Discussion</span><i class="unread" hidden></i></button>
               <button class="tool" data-panel="files" type="button" title="Fichiers"><svg class="i"><use href="#i-file"/></svg><span>Fichiers</span></button>
               <button class="tool" data-panel="clipboard" type="button" title="Presse-papiers"><svg class="i"><use href="#i-clipboard"/></svg><span>Presse-papiers</span></button>
@@ -253,10 +263,16 @@
             <form id="chatForm" class="composer"><input id="messageInput" placeholder="Écrire un message…" maxlength="2000" aria-label="Message"><button class="icon-btn primary" type="submit" aria-label="Envoyer"><svg class="i"><use href="#i-send"/></svg></button></form>
           </div>
           <div class="side-content" data-content="files" hidden>
-            <label class="drop" for="fileInput"><svg class="i"><use href="#i-file"/></svg><b id="fileLabel">Choisir un fichier</b><small>25 Mo maximum · le destinataire doit accepter</small></label>
+            <label class="drop" for="fileInput"><svg class="i"><use href="#i-file"/></svg><b id="fileLabel">Choisir un fichier</b><small>Jusqu’à 2 Go · le destinataire doit accepter</small></label>
             <input id="fileInput" type="file" hidden>
             <button id="sendFile" class="btn primary block" type="button">Envoyer le fichier</button>
+            <div id="fileProgress" class="transfer" hidden>
+              <div class="transfer-head"><b id="fileProgressName">fichier</b><span id="fileProgressPercent">0 %</span></div>
+              <progress id="fileProgressBar" max="100" value="0"></progress>
+              <small id="fileProgressDetail" class="muted"></small>
+            </div>
             <p id="fileStatus" class="muted" aria-live="polite"></p>
+            <button id="showReceivedFile" class="btn ghost block" type="button" hidden><svg class="i"><use href="#i-folder"/></svg>Afficher dans le dossier</button>
           </div>
           <div class="side-content" data-content="clipboard" hidden>
             <textarea id="clipboardText" rows="8" placeholder="Texte à envoyer ou reçu de l’autre ordinateur"></textarea>

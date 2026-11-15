@@ -30,6 +30,8 @@
     <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
     <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 6 6M22 9l-6 6"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
   </svg>
 
@@ -126,6 +128,11 @@
               <button role="menuitem" data-combo="lock" type="button">Win + L (Verrouiller)</button>
             </div>
           </div>
+          <div class="menu-wrap viewer-only" id="screensWrap" hidden>
+            <button id="screensButton" class="tool" type="button" aria-haspopup="menu" aria-expanded="false" title="Choisir l’écran distant"><svg class="i"><use href="#i-screen"/></svg><span>Écran</span></button>
+            <div id="screensMenu" class="menu" role="menu" hidden></div>
+          </div>
+          <button id="toggleSound" class="tool viewer-only" type="button" aria-pressed="true" title="Couper ou activer le son" hidden><svg class="i"><use href="#i-volume"/></svg><span>Son</span></button>
           <span class="sep viewer-only"></span>
           <button id="zoomFit" class="tool viewer-only" type="button" aria-pressed="true" title="Ajuster"><svg class="i"><use href="#i-fit"/></svg></button>
           <button id="zoomOut" class="tool viewer-only" type="button" title="Réduire"><svg class="i"><use href="#i-minus"/></svg></button>
@@ -152,9 +159,14 @@
             <form id="chatForm" class="composer"><input id="message" placeholder="Écrire un message…" maxlength="2000" aria-label="Message"><button class="icon-btn primary" type="submit" aria-label="Envoyer"><svg class="i"><use href="#i-send"/></svg></button></form>
           </div>
           <div class="side-content" data-content="files" hidden>
-            <label class="drop" for="file"><svg class="i"><use href="#i-file"/></svg><b id="fileLabel">Choisir un fichier</b><small>25 Mo maximum</small></label>
+            <label class="drop" for="file"><svg class="i"><use href="#i-file"/></svg><b id="fileLabel">Choisir un fichier</b><small>Jusqu’à 2 Go en liaison directe</small></label>
             <input id="file" type="file" hidden>
             <button id="sendFile" class="btn primary block" type="button">Envoyer</button>
+            <div id="fileProgress" class="transfer" hidden>
+              <div class="transfer-head"><b id="fileProgressName">fichier</b><span id="fileProgressPercent">0 %</span></div>
+              <progress id="fileProgressBar" max="100" value="0"></progress>
+              <small id="fileProgressDetail" class="muted"></small>
+            </div>
             <p id="fileStatus" class="muted" aria-live="polite"></p>
           </div>
           <div class="side-content" data-content="clipboard" hidden>

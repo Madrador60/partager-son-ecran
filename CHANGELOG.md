@@ -1,5 +1,16 @@
 # Changelog
 
+## 6.4.0
+
+### Nouveautés
+- **Changer d’écran pendant la session** : l’aidant choisit l’écran 1 ou 2 de son ami depuis le menu « Écran » ; l’ami peut aussi cliquer sur « Changer d’écran ».
+- **Son de l’ordinateur partagé** (option) : vidéos, alertes, musique ; bouton « Son » pour le couper chez l’aidant.
+- **Gros fichiers jusqu’à 2 Go**, envoyés en direct entre les deux PC avec barre de progression, vitesse et temps restant ; écriture directe sur le disque et bouton « Afficher dans le dossier ».
+
+### Corrections
+- **Connexion bloquée sur « Connexion… »** : l’offre de l’hôte pouvait arriver avant que l’aidant soit prêt et était perdue. Elle est maintenant conservée puis rejouée.
+- La validation sur `main` n’essaie plus de republier l’installeur.
+
 ## 6.3.0
 
 ### Aider un ami sur Internet

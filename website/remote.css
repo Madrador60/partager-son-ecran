@@ -196,3 +196,8 @@ input:checked ~ .switch::after { transform: translateX(16px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.transfer { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.transfer-head { display: flex; justify-content: space-between; gap: 10px; }
+.transfer-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transfer progress { width: 100%; accent-color: var(--accent); }
+.menu button.current { color: var(--accent); font-weight: 650; }
