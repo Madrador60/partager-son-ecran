@@ -201,3 +201,13 @@ input:checked ~ .switch::after { transform: translateX(16px); }
 .transfer-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfer progress { width: 100%; accent-color: var(--accent); }
 .menu button.current { color: var(--accent); font-weight: 650; }
+.qr-block { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
+.qr-block canvas { flex: none; width: 148px; height: 148px; border-radius: 10px; background: #fff; image-rendering: pixelated; }
+.qr-block p { display: grid; gap: 4px; }
+.qr-block small { color: var(--muted); }
+.stage video { touch-action: none; -webkit-user-select: none; user-select: none; }
+.mobile-input { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
+.touch-only { display: none; }
+@media (pointer: coarse) { .touch-only { display: inline-flex; } .qr-block { display: none; } }
+.overlay.tap { border: 0; color: #fff; font-size: 16px; cursor: pointer; }
+.overlay.tap .i { width: 44px; height: 44px; padding: 10px; border-radius: 50%; background: var(--accent); }

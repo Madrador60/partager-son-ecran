@@ -1,5 +1,13 @@
 # Changelog
 
+## 6.4.1
+
+- **QR code** à côté du code : scannez-le avec un téléphone pour ouvrir la version web et se connecter directement.
+- Lien `…/remote?code=123456789` : la page web se connecte toute seule.
+- **Version web au doigt** : toucher = clic, appui long = clic droit, glisser = déplacer, bouton « Taper » pour le clavier du téléphone.
+- **Correctif** : connexion qui restait bloquée entre deux PC sur la même box (adresses locales masquées par Chromium).
+- **Correctif** : image noire sur téléphone (lecture automatique avec son refusée) ; l’image démarre sans son, un appui sur « Son » l’active.
+
 ## 6.4.0
 
 ### Nouveautés

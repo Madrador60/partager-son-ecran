@@ -32,6 +32,8 @@
     <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
     <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 6 6M22 9l-6 6"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V5h16v2M12 5v14M9 19h6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
   </svg>
 
@@ -105,6 +107,10 @@
         <div id="hostWaiting" class="waiting" hidden>
           <p class="muted center">Donnez ce code à l’autre personne</p>
           <div class="code-display"><output id="hostCode">— — —</output><button id="copyHostCode" class="icon-btn" type="button" aria-label="Copier le code"><svg class="i"><use href="#i-copy"/></svg></button></div>
+          <div id="qrBlock" class="qr-block">
+            <canvas id="hostQr" width="148" height="148" aria-label="QR code pour se connecter depuis un téléphone"></canvas>
+            <p><b>Depuis un téléphone</b><small>Scannez ce QR code pour ouvrir la page avec ce code.</small></p>
+          </div>
           <p class="meta"><span class="pulse"></span><span id="hostWaitingText">En attente d’une demande…</span> · <span id="hostExpiry">Valable sans limite</span></p>
           <div class="row center"><button id="regenerateHostCode" class="btn ghost" type="button">Nouveau code</button><button id="stopHosting" class="btn danger-ghost" type="button">Arrêter</button></div>
         </div>
@@ -132,6 +138,7 @@
             <button id="screensButton" class="tool" type="button" aria-haspopup="menu" aria-expanded="false" title="Choisir l’écran distant"><svg class="i"><use href="#i-screen"/></svg><span>Écran</span></button>
             <div id="screensMenu" class="menu" role="menu" hidden></div>
           </div>
+          <button id="mobileKeyboard" class="tool viewer-only touch-only" type="button" title="Ouvrir le clavier du téléphone"><svg class="i"><use href="#i-type"/></svg><span>Taper</span></button>
           <button id="toggleSound" class="tool viewer-only" type="button" aria-pressed="true" title="Couper ou activer le son" hidden><svg class="i"><use href="#i-volume"/></svg><span>Son</span></button>
           <span class="sep viewer-only"></span>
           <button id="zoomFit" class="tool viewer-only" type="button" aria-pressed="true" title="Ajuster"><svg class="i"><use href="#i-fit"/></svg></button>
@@ -150,7 +157,9 @@
       <div class="session-body">
         <div id="stage" class="stage fit">
           <video id="video" autoplay playsinline tabindex="0" aria-label="Écran distant"></video>
+          <input id="mobileInput" class="mobile-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Texte à envoyer">
           <div id="videoLoader" class="overlay"><span class="spinner"></span><p>Connexion à l’écran…</p></div>
+          <button id="tapToPlay" class="overlay tap" type="button" hidden><svg class="i"><use href="#i-play"/></svg><p>Touchez pour afficher l’écran</p></button>
         </div>
         <aside id="side" class="side" hidden>
           <div class="side-head"><h2 id="sideTitle">Discussion</h2><button id="closeSide" class="icon-btn" type="button" aria-label="Fermer"><svg class="i"><use href="#i-x"/></svg></button></div>
@@ -211,6 +220,7 @@
 
   <script src="./runtime-config.js"></script>
   <script src="./vendor/socket.io.min.js"></script>
+  <script src="./vendor/qrcode.js"></script>
   <script type="module" src="./remote.js"></script>
 </body>
 </html>

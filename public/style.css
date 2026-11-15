@@ -353,3 +353,7 @@ progress { width: 100%; height: 8px; margin-top: 12px; accent-color: var(--accen
 .transfer-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .transfer progress { margin: 0; }
 .menu button.current { color: var(--accent); font-weight: 650; }
+.qr-block { display: flex; align-items: center; gap: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); text-align: left; }
+.qr-block canvas { flex: none; width: 148px; height: 148px; border-radius: 10px; background: #fff; image-rendering: pixelated; }
+.qr-block p { display: grid; gap: 4px; }
+.qr-block small { color: var(--muted); }

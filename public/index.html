@@ -132,6 +132,10 @@
                 <output id="hostCode" aria-live="polite">— — —</output>
                 <button id="copyCode" class="icon-btn" type="button" title="Copier le code" aria-label="Copier le code"><svg class="i"><use href="#i-copy"/></svg></button>
               </div>
+              <div id="qrBlock" class="qr-block" hidden>
+                <canvas id="hostQr" width="148" height="148" aria-label="QR code pour se connecter depuis un téléphone"></canvas>
+                <p><b>Aider depuis un téléphone</b><small>Scannez ce QR code : la page s’ouvre et se connecte avec ce code.</small></p>
+              </div>
               <p class="code-meta"><span class="pulse"></span><span id="hostWaitingText">En attente d’une demande de connexion…</span><span class="sep">·</span><span id="codeValidity">Valable sans limite</span></p>
               <div class="row center">
                 <button id="newCode" class="btn ghost" type="button"><svg class="i"><use href="#i-refresh"/></svg>Nouveau code</button>
@@ -436,6 +440,7 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
 
   <script src="vendor/socket.io.min.js"></script>
+  <script src="vendor/qrcode.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

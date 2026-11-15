@@ -39,6 +39,8 @@ async function run() {
   const html = fs.readFileSync(path.join(root, "public", "index.html"), "utf8");
   assert.match(html, /vendor\/socket\.io\.min\.js/);
   assert.ok(fs.existsSync(path.join(root, "public", "vendor", "socket.io.min.js")));
+  assert.ok(fs.existsSync(path.join(root, "public", "vendor", "qrcode.js")));
+  assert.ok(fs.existsSync(path.join(root, "website", "vendor", "qrcode.js")));
   assert.ok(require("../package.json").build.files.includes("preload.js"));
   const webRemote = fs.readFileSync(path.join(root, "website", "remote.js"), "utf8");
   assert.match(webRemote, /captureDisplay/);
