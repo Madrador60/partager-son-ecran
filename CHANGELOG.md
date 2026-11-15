@@ -1,5 +1,10 @@
 # Changelog
 
+## 6.4.2
+
+- Si la connexion n’aboutit pas en 25 secondes, l’application et la version web expliquent pourquoi (réseau qui bloque la liaison directe) et quoi faire, au lieu de rester sur « Connexion… ».
+- Relais TURN (Metered) activé sur le serveur public : les connexions en 4G ou derrière une box stricte passent désormais par le relais.
+
 ## 6.4.1
 
 - **QR code** à côté du code : scannez-le avec un téléphone pour ouvrir la version web et se connecter directement.
