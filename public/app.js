@@ -32,6 +32,10 @@ const state = {
 };
 let systemDiagnostics = null;
 
+function isLocalServer(value) {
+  try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(value).hostname); } catch { return true; }
+}
+
 function notify(message, type = "info", title = "Madrador Remote") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
@@ -139,8 +143,21 @@ async function flushCandidates() {
   }
 }
 
+function tuneVideoSenders(peer) {
+  // Débit plus élevé que le défaut WebRTC (~2,5 Mb/s) pour un texte lisible.
+  for (const sender of peer.getSenders()) {
+    if (sender.track?.kind !== "video") continue;
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) continue;
+    parameters.encodings[0].maxBitrate = 8_000_000;
+    parameters.degradationPreference = "maintain-resolution";
+    sender.setParameters(parameters).catch(() => {});
+  }
+}
+
 async function createPeer(isHost) {
-  const iceServers = await bridge.getIceServers();
+  // Le processus principal récupère les identifiants TURN temporaires du serveur partagé.
+  const iceServers = await bridge.getIceServers(state.serverUrl);
   const peer = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
   state.peer = peer;
   state.channels = {};
@@ -159,11 +176,19 @@ async function createPeer(isHost) {
       $("sessionNavDot").classList.add("live");
       showPanel("session");
       monitorStats(peer);
+      if (isHost) tuneVideoSenders(peer);
     }
     if (peer.connectionState === "failed") {
       $("sessionState").textContent = "Reconnexion en cours";
       notify("La liaison est interrompue. Tentative de reprise…", "info", "Reconnexion");
       peer.restartIce();
+      // Seul l'hôte (émetteur de l'offre) renégocie, sinon les deux offres se croisent.
+      if (isHost) {
+        peer.createOffer({ iceRestart: true })
+          .then((offer) => peer.setLocalDescription(offer))
+          .then(() => state.socket.emit("signal", { code: activeCode(), data: { type: "offer", sdp: peer.localDescription } }))
+          .catch((error) => console.warn(error));
+      }
     }
   };
   if (!isHost) {
@@ -246,7 +271,7 @@ function bindSocket(socket) {
     state.codeExpiresAt = expiresAt || 0;
     startCodeTimer();
     bridge.setHostCode(code);
-    notify("Code prêt pendant 10 minutes", "success");
+    notify(expiresAt ? `Code valable jusqu’à ${new Date(expiresAt).toLocaleTimeString()}` : "Code prêt, sans limite de durée", "success");
   });
   socket.on("session-expired", () => {
     state.sessionCode = null;
@@ -286,13 +311,23 @@ function bindSocket(socket) {
   });
   socket.on("session-resumed", () => notify("Session reprise", "success"));
   socket.on("resume-denied", () => {
+    // Le serveur a pu redémarrer : la liaison directe WebRTC continue de fonctionner,
+    // on ne coupe donc pas une session qui marche encore.
+    if (state.peer && ["connected", "connecting"].includes(state.peer.connectionState)) {
+      notify("Le serveur a redémarré. L’écran et le contrôle continuent ; le chat et les fichiers reviendront à la prochaine session.", "info", "Session maintenue");
+      return;
+    }
     notify("La période de reprise est terminée.", "error", "Session expirée");
     stopSession(false);
   });
   socket.on("viewer-ready", async () => {
     if (!state.stream) return notify("Sélectionnez d’abord un écran", "error");
     const peer = await createPeer(true);
-    state.stream.getTracks().forEach((track) => peer.addTrack(track, state.stream));
+    for (const track of state.stream.getTracks()) {
+      // "detail" privilégie la netteté du texte plutôt que la fluidité : idéal pour dépanner.
+      if (track.kind === "video") track.contentHint = "detail";
+      peer.addTrack(track, state.stream);
+    }
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
     socket.emit("signal", { code: state.sessionCode, data: { type: "offer", sdp: peer.localDescription } });
@@ -431,18 +466,38 @@ function monitorStats(peer) {
   }, 1000);
 }
 
-function sendInput(type, event, extra = {}) {
+function videoPoint(event) {
+  // Tient compte des bandes noires (object-fit: contain) pour viser au pixel près.
+  const video = $("remoteVideo");
+  const rect = video.getBoundingClientRect();
+  const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : rect.width / rect.height;
+  let width = rect.width;
+  let height = rect.height;
+  if (width / height > ratio) width = height * ratio; else height = width / ratio;
+  const left = rect.left + (rect.width - width) / 2;
+  const top = rect.top + (rect.height - height) / 2;
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - left) / width)),
+    y: Math.max(0, Math.min(1, (event.clientY - top) / height))
+  };
+}
+
+function sendPayload(payload) {
   if (!state.remoteCode || !state.permissions.control) return;
-  const rect = $("remoteVideo").getBoundingClientRect();
-  state.socket.emit("remote-input", {
-    code: state.remoteCode,
-    payload: {
-      type,
-      x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-      y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
-      ...extra
-    }
-  });
+  // Connexion directe WebRTC en priorité, serveur en secours.
+  const channel = state.channels[payload.type === "mousemove" ? "input-fast" : "commands"];
+  if (channel?.readyState === "open") channel.send(JSON.stringify(payload));
+  else state.socket.emit("remote-input", { code: state.remoteCode, payload });
+}
+
+function sendInput(type, event, extra = {}) {
+  sendPayload({ type, ...videoPoint(event), ...extra });
+}
+
+function sendKey(event) {
+  if (!state.remoteCode || !state.permissions.control) return;
+  event.preventDefault();
+  sendPayload({ type: "keydown", key: event.key.slice(0, 40), code: event.code.slice(0, 40), ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey });
 }
 
 async function init() {
@@ -460,11 +515,22 @@ async function init() {
   $("aboutVersion").textContent = `Version ${info.version}`;
   const configured = localStorage.getItem(SERVER_KEY) || await bridge.getSignalUrl();
   if (!configured) throw new Error("Le serveur intégré n’a pas pu démarrer.");
+  state.serverUrl = configured;
   $("serverUrl").value = configured;
   $("serverDisplay").textContent = new URL(configured).host;
   $("sidebarServer").textContent = new URL(configured).host;
-  state.socket = io(configured, { transports: ["websocket", "polling"], timeout: 10000 });
+  const localOnly = isLocalServer(configured);
+  $("localModeBanner").hidden = !localOnly;
+  $("openConnectionSettings").onclick = () => {
+    showPanel("settings");
+    document.querySelector('.setting-tab[data-setting="connection"]')?.click();
+    $("serverUrl").focus();
+  };
+  state.socket = io(configured, { transports: ["websocket", "polling"], timeout: 10000, reconnectionDelayMax: 10000 });
   bindSocket(state.socket);
+  // Les hébergeurs gratuits (Render…) mettent le serveur en veille sans trafic HTTP :
+  // un signal régulier le garde éveillé pour que le code reste valable indéfiniment.
+  if (!localOnly) setInterval(() => { fetch(`${configured}/api/health`, { cache: "no-store" }).catch(() => {}); }, 4 * 60_000);
 
   document.querySelectorAll(".nav").forEach((button) => button.onclick = () => showPanel(button.dataset.panel));
   $("remoteCode").oninput = (event) => { event.target.value = formatCode(event.target.value); };
@@ -526,8 +592,12 @@ async function init() {
     notify("Texte partagé", "success");
   };
   $("saveServer").onclick = () => {
+    if (!$("serverUrl").value.trim()) {
+      localStorage.removeItem(SERVER_KEY);
+      return location.reload();
+    }
     try {
-      const url = new URL($("serverUrl").value);
+      const url = new URL($("serverUrl").value.trim());
       if (!["http:", "https:"].includes(url.protocol)) throw new Error();
       localStorage.setItem(SERVER_KEY, url.origin);
       location.reload();
@@ -611,10 +681,15 @@ async function init() {
   };
   renderRecents();
   renderHistory();
-  ["mousedown", "mouseup"].forEach((type) => $("remoteVideo").addEventListener(type, (event) => sendInput(type, event, { button: event.button })));
+  ["mousedown", "mouseup"].forEach((type) => $("remoteVideo").addEventListener(type, (event) => {
+    if (type === "mousedown") $("remoteVideo").focus();
+    if (event.button > 2) return;
+    event.preventDefault();
+    sendInput(type, event, { button: event.button });
+  }));
   $("remoteVideo").addEventListener("mousemove", (event) => sendInput("mousemove", event));
-  $("remoteVideo").addEventListener("wheel", (event) => { event.preventDefault(); sendInput("wheel", event, { deltaY: event.deltaY }); }, { passive: false });
-  $("remoteVideo").addEventListener("keydown", (event) => { event.preventDefault(); sendInput("keydown", event, { key: event.key }); });
+  $("remoteVideo").addEventListener("wheel", (event) => { event.preventDefault(); sendInput("wheel", event, { deltaY: Math.max(-10000, Math.min(10000, event.deltaY)) }); }, { passive: false });
+  $("remoteVideo").addEventListener("keydown", sendKey);
   $("remoteVideo").addEventListener("contextmenu", (event) => event.preventDefault());
 }
 

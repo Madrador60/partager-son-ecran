@@ -6,7 +6,7 @@ test("accueil, téléchargement et interface distante", async ({ page }) => {
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Aidez un écran distant/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Télécharger pour Windows" })).toHaveAttribute("href", /api\/download\/latest\/windows/);
+  await expect(page.getByRole("link", { name: "Télécharger pour Windows" })).toHaveAttribute("href", /api\/download\/latest\/windows|github\.com\/Madrador60\/partager-son-ecran\/releases/);
 
   await page.goto("/remote.html");
   await expect(page.getByRole("heading", { name: "Partager mon PC" })).toBeVisible();

@@ -54,6 +54,9 @@ function peerOf(socket, session) {
 
 const app = express();
 app.disable("x-powered-by");
+// Derrière le proxy HTTPS de l'hébergeur (Render, Railway, Fly…) : IP réelle pour
+// la limitation de débit et protocole https correct dans runtime-config.js.
+if (process.env.TRUST_PROXY || process.env.RENDER || process.env.NODE_ENV === "production") app.set("trust proxy", Number(process.env.TRUST_PROXY || 1));
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {

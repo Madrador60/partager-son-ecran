@@ -189,10 +189,6 @@ socket.on("chat-message", ({ text }) => addMessage(text, false));
 socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Presse-papiers synchronisé"); });
 socket.on("session-ended", () => end(false));
 socket.on("viewer-left", () => { toast("Le participant a quitté la session"); $("participants").innerHTML = "<small>Aucun participant connecté</small>"; showOnly("hostPanel"); });
-if (!signalUrl) {
-  setStatus("Serveur public à configurer");
-  $("capabilityNotice").textContent = "Le site est en ligne, mais les sessions distantes nécessitent encore l’URL du serveur public.";
-}
 
 $("openHost").onclick = () => { state.role = "host"; showOnly("hostPanel"); };
 $("openViewer").onclick = () => { state.role = "viewer"; showOnly("connectPanel"); };
@@ -220,6 +216,7 @@ $("webAccept").onclick = () => { state.permissions = webPermissions(); socket.em
 $("code").oninput = (event) => { event.target.value = formatCode(event.target.value); };
 $("connect").onclick = () => {
   const value = $("code").value.replace(/\D/g, ""); if (value.length !== 9) return setStatus("Le code doit contenir neuf chiffres");
+  if (!socket.connected) return setStatus("Serveur injoignable, réessayez dans un instant");
   state.code = value; state.role = "viewer"; socket.emit("viewer-request", { code: value, deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim() });
   $("connectError").hidden = true; setConnecting(true); setStatus("Attente de l’autorisation…");
 };
@@ -283,4 +280,11 @@ function monitor(peer, host) {
 
 $("capabilityNotice").textContent = platform.displayCapture ? "✓ Partage d’écran disponible. Le contrôle système nécessite l’application Windows." : "⚠ Ce navigateur ne permet pas le partage d’écran.";
 if (!platform.displayCapture) $("openHost").disabled = true;
+if (!signalUrl) {
+  // Sans serveur public, aucune session ne peut aboutir : on le dit clairement au lieu d’attendre indéfiniment.
+  setStatus("Serveur public à configurer");
+  $("capabilityNotice").textContent = "⚠ Le serveur de connexion n’est pas encore configuré : utilisez l’application Windows en attendant.";
+  $("openHost").disabled = true;
+  $("openViewer").disabled = true;
+}
 if (!window.RTCPeerConnection || !window.WebSocket) { setStatus("Navigateur incompatible"); $("openHost").disabled = true; $("openViewer").disabled = true; }

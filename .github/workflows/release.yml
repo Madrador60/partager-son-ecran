@@ -70,6 +70,20 @@ jobs:
             Write-Host "Certificat Windows configuré : electron-builder signera les exécutables."
           }
 
+      - name: Embed public signaling server
+        shell: pwsh
+        env:
+          SIGNAL_URL: ${{ vars.MADRADOR_SIGNAL_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIGNAL_URL)) {
+            Write-Warning "Variable MADRADOR_SIGNAL_URL absente : l'application utilisera son serveur local et ne pourra pas relier deux réseaux différents."
+            exit 0
+          }
+          $uri = [Uri]$env:SIGNAL_URL
+          if ($uri.Scheme -ne "https") { throw "MADRADOR_SIGNAL_URL doit utiliser HTTPS." }
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.madrador={...(p.madrador||{}),signalUrl:new URL(process.env.SIGNAL_URL).origin};fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');"
+          Write-Host "Serveur public intégré : $($uri.GetLeftPart([UriPartial]::Authority))"
+
       - name: Build Windows installer and updater metadata
         run: npm run dist
         env:

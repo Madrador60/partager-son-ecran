@@ -13,6 +13,12 @@ function createIceServers(env = process.env, now = Date.now()) {
   const urls = splitUrls(env.MADRADOR_TURN_URL);
   if (!urls.length || !env.MADRADOR_TURN_USERNAME || !env.MADRADOR_TURN_CREDENTIAL) return iceServers;
 
+  // Fournisseurs TURN hébergés (Metered, Twilio…) : identifiants fixes fournis par le service.
+  if (String(env.MADRADOR_TURN_MODE || "").toLowerCase() === "static") {
+    iceServers.push({ urls, username: String(env.MADRADOR_TURN_USERNAME), credential: String(env.MADRADOR_TURN_CREDENTIAL), credentialType: "password" });
+    return iceServers;
+  }
+
   const lifetimeSeconds = Math.min(3600, Math.max(300, Number(env.MADRADOR_TURN_TTL_SECONDS || 1800)));
   const expiresAt = Math.floor(now / 1000) + lifetimeSeconds;
   const username = `${expiresAt}:${String(env.MADRADOR_TURN_USERNAME).replace(/[^a-zA-Z0-9_.-]/g, "")}`;
