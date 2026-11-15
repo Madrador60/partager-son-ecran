@@ -482,6 +482,15 @@ async function createPeer(isHost) {
   const iceServers = await bridge.getIceServers(state.serverUrl);
   const peer = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
   state.peer = peer;
+  // Sans réponse après 25 s, on explique pourquoi au lieu de rester sur « Connexion… ».
+  const hasRelay = iceServers.some((server) => [].concat(server.urls).some((url) => /^turns?:/.test(url)));
+  clearTimeout(state.timers.connect);
+  state.timers.connect = setTimeout(() => {
+    if (state.peer !== peer || peer.connectionState === "connected") return;
+    setSessionStatus("Connexion directe impossible");
+    $("stageOverlayText").textContent = "Connexion impossible : le réseau bloque la liaison directe.";
+    notify(hasRelay ? "Même avec le relais, les deux appareils n’arrivent pas à se joindre. Vérifiez la connexion Internet des deux côtés, puis réessayez." : "La liaison directe est bloquée par le réseau (4G, box ou Wi-Fi public). Il faut un relais TURN sur le serveur : voir DEPLOYMENT.md. En attendant, mettez les deux appareils sur le même Wi-Fi.", "error", "Connexion bloquée");
+  }, 25_000);
   state.channels = {};
   state.candidateQueue = [];
 
@@ -491,6 +500,7 @@ async function createPeer(isHost) {
   peer.onconnectionstatechange = () => {
     const labels = { new: "Préparation…", connecting: "Connexion…", connected: "Connecté", disconnected: "Connexion instable…", failed: "Reconnexion…", closed: "Terminé" };
     setSessionStatus(labels[peer.connectionState] || peer.connectionState);
+    if (peer.connectionState === "connected") clearTimeout(state.timers.connect);
     if (peer.connectionState === "connected" && !state.sessionStartedAt) {
       state.sessionStartedAt = Date.now();
       startSessionTimer();
@@ -713,6 +723,7 @@ async function endSession({ notifyPeer = true, reason = "Session terminée." } =
   await abortTransfers();
   clearInterval(state.timers.stats);
   clearInterval(state.timers.session);
+  clearTimeout(state.timers.connect);
   state.peer?.close();
   await bridge.setControlEnabled({ enabled: false, bounds: null }).catch(() => {});
   if (state.sessionStartedAt) {
