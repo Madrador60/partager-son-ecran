@@ -118,7 +118,7 @@ async function run() {
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
   assert.equal((await fetch(`${url}/site.css`)).status, 200);
-  assert.equal((await fetch(`${url}/release-notes.css`)).status, 200);
+  assert.equal((await fetch(`${url}/remote.css`)).status, 200);
   assert.equal((await fetch(`${url}/remote`)).status, 200);
   assert.equal((await fetch(`${url}/remote.js`)).status, 200);
   assert.equal((await fetch(`${url}/runtime-config.js`)).status, 200);

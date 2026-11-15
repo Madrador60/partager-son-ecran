@@ -1,290 +1,549 @@
 import { captureDisplay, detectPlatform } from "./shared/capabilities.js";
 
 const $ = (id) => document.getElementById(id);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
 const runtimeConfig = window.MADRADOR_CONFIG || {};
 const onStaticPages = location.hostname === "madrador60.github.io";
 const apiUrl = String(runtimeConfig.apiUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
 const signalUrl = String(runtimeConfig.signalUrl || (onStaticPages ? "" : location.origin)).replace(/\/+$/, "");
 const socket = signalUrl
-  ? io(signalUrl, { transports: ["websocket", "polling"], timeout: 10000 })
+  ? io(signalUrl, { transports: ["websocket", "polling"], timeout: 10000, reconnectionDelayMax: 10000 })
   : io({ autoConnect: false });
 const platform = detectPlatform();
-const state = {
-  role: null, peer: null, code: null, stream: null, permissions: {}, candidates: [],
-  channels: {}, incomingFile: null, pendingViewer: null, statsTimer: null,
-  durationTimer: null, expiryTimer: null, startedAt: 0, zoom: 1, resumeToken: null
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const DEVICE_NAME = `Navigateur ${navigator.userAgentData?.brands?.find((brand) => !/Not.A.Brand|Chromium/i.test(brand.brand))?.brand || ""}`.trim();
+// Raccourcis que le PC de l'aidant intercepterait lui-même.
+const COMBOS = {
+  win: { key: "Meta", code: "MetaLeft", meta: true },
+  alttab: { key: "Tab", code: "Tab", alt: true },
+  taskmgr: { key: "Escape", code: "Escape", ctrl: true, shift: true },
+  desktop: { key: "d", code: "KeyD", meta: true },
+  altf4: { key: "F4", code: "F4", alt: true },
+  lock: { key: "l", code: "KeyL", meta: true }
 };
 
+const state = {
+  role: null, peer: null, code: null, stream: null, resumeToken: null,
+  permissions: { control: false, clipboard: false, files: false },
+  candidates: [], channels: {}, pendingViewer: null, pendingFileOffer: null,
+  inputPaused: false, zoom: 0, side: null, startedAt: 0, timers: {}
+};
+
+/* ---------- Utilitaires ---------- */
+
 const formatCode = (value) => String(value || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ");
+const formatDuration = (seconds) => [Math.floor(seconds / 3600), Math.floor(seconds % 3600 / 60), seconds % 60].map((part) => String(part).padStart(2, "0")).join(":");
+const formatBytes = (bytes) => bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} Mo` : `${Math.ceil(bytes / 1024)} Ko`;
+const initials = (name) => String(name || "PC").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "PC";
 const setStatus = (text) => { $("status").textContent = String(text).slice(0, 120); };
+
 function toast(text) {
   const item = document.createElement("div");
-  item.className = "toast"; item.textContent = String(text).slice(0, 220);
-  $("toasts").append(item); setTimeout(() => item.remove(), 4000);
+  item.className = "toast";
+  item.textContent = String(text).slice(0, 220);
+  $("toasts").append(item);
+  while ($("toasts").children.length > 3) $("toasts").firstElementChild.remove();
+  setTimeout(() => item.remove(), 4500);
 }
-function showOnly(id) {
-  ["modePanel", "hostPanel", "connectPanel", "sessionPanel"].forEach((panel) => { $(panel).hidden = panel !== id; });
-  $("leave").disabled = id !== "sessionPanel";
+
+function showPanel(id) {
+  for (const panel of ["modePanel", "connectPanel", "hostPanel", "sessionPanel"]) $(panel).hidden = panel !== id;
 }
-function webPermissions() {
-  return {
-    control: false, mouse: false, keyboard: false,
-    clipboard: $("webClipboard").checked, files: $("webFiles").checked,
-    audio: $("webAudio").checked
-  };
+
+/* ---------- Aider (viewer) ---------- */
+
+function setPending(active, title = "Demande envoyée", text = "La personne doit accepter sur son ordinateur.") {
+  $("connectPending").hidden = !active;
+  $("connectForm").hidden = active;
+  $("pendingTitle").textContent = title;
+  $("pendingText").textContent = text;
 }
-function setConnecting(active, title = "Demande envoyée", detail = "En attente de l’autorisation du PC distant…") {
-  $("connectionProgress").hidden = !active; $("connect").disabled = active;
-  $("progressTitle").textContent = title; $("progressDetail").textContent = detail;
-}
+
 function showError(message) {
-  setConnecting(false); $("errorDetail").textContent = String(message).slice(0, 180); $("connectError").hidden = false;
+  setPending(false);
+  $("errorText").textContent = String(message).slice(0, 180);
+  $("connectError").hidden = false;
 }
-function startClock() {
-  state.startedAt = Date.now(); clearInterval(state.durationTimer);
+
+function requestConnection(event) {
+  event.preventDefault();
+  const value = $("code").value.replace(/\D/g, "");
+  if (value.length !== 9) return showError("Le code contient 9 chiffres.");
+  if (!socket.connected) return showError("Le serveur de connexion est injoignable. Réessayez dans un instant (jusqu’à une minute s’il sortait de veille).");
+  state.code = value;
+  state.role = "viewer";
+  $("connectError").hidden = true;
+  socket.emit("viewer-request", { code: value, deviceName: DEVICE_NAME });
+  setPending(true);
+}
+
+/* ---------- Montrer (hôte navigateur) ---------- */
+
+function hostPermissions() {
+  // Un navigateur ne peut pas piloter le système : le contrôle reste désactivé.
+  return { control: false, clipboard: $("webClipboard").checked, files: $("webFiles").checked };
+}
+
+async function chooseDisplay() {
+  try {
+    const stream = await captureDisplay({ audio: false });
+    state.stream?.getTracks().forEach((track) => track.stop());
+    state.stream = stream;
+    $("hostPreview").srcObject = stream;
+    $("hostPreview").hidden = false;
+    $("sourceEmpty").hidden = true;
+    $("generateHostCode").disabled = false;
+    stream.getVideoTracks()[0].addEventListener("ended", () => {
+      if (state.role === "host") endSession(true, "Le partage a été arrêté depuis le navigateur.");
+      else resetHost();
+    });
+  } catch (error) {
+    toast(error.name === "NotAllowedError" ? "Partage annulé." : error.message);
+  }
+}
+
+function createHostCode() {
+  if (!state.stream) return toast("Choisissez d’abord ce que vous voulez montrer.");
+  if (!socket.connected) return toast("Le serveur de connexion est injoignable.");
+  state.role = "host";
+  state.permissions = hostPermissions();
+  socket.emit("host-create", { deviceName: DEVICE_NAME, permissions: state.permissions, durationMinutes: Number($("webDuration").value), available: true });
+}
+
+function showHostWaiting(code, expiresAt) {
+  $("hostSetup").hidden = true;
+  $("hostWaiting").hidden = false;
+  $("hostCode").textContent = formatCode(code);
+  clearInterval(state.timers.expiry);
+  if (!expiresAt) { $("hostExpiry").textContent = "Valable sans limite"; return; }
   const tick = () => {
-    const elapsed = Math.floor((Date.now() - state.startedAt) / 1000);
-    $("sessionDuration").textContent = [Math.floor(elapsed / 3600), Math.floor(elapsed % 3600 / 60), elapsed % 60].map((part) => String(part).padStart(2, "0")).join(":");
+    const seconds = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    $("hostExpiry").textContent = seconds ? `Expire dans ${formatDuration(seconds).replace(/^00:/, "")}` : "Code expiré";
   };
-  tick(); state.durationTimer = setInterval(tick, 1000);
+  tick();
+  state.timers.expiry = setInterval(tick, 1000);
 }
-function startExpiry(expiresAt) {
-  clearInterval(state.expiryTimer);
-  if (!expiresAt) { $("hostExpiry").textContent = "Illimitée"; return; }
-  const tick = () => {
-    const seconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
-    $("hostExpiry").textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  };
-  tick(); state.expiryTimer = setInterval(tick, 1000);
+
+function resetHost({ stopStream = false } = {}) {
+  clearInterval(state.timers.expiry);
+  $("hostSetup").hidden = false;
+  $("hostWaiting").hidden = true;
+  if (stopStream) {
+    state.stream?.getTracks().forEach((track) => track.stop());
+    state.stream = null;
+    $("hostPreview").srcObject = null;
+    $("hostPreview").hidden = true;
+    $("sourceEmpty").hidden = false;
+    $("generateHostCode").disabled = true;
+  }
 }
+
+/* ---------- WebRTC ---------- */
+
 async function iceServers() {
   if (!apiUrl) return [{ urls: "stun:stun.l.google.com:19302" }];
-  const response = await fetch(`${apiUrl}/api/ice`);
-  return response.ok ? (await response.json()).iceServers : [{ urls: "stun:stun.l.google.com:19302" }];
+  try {
+    const response = await fetch(`${apiUrl}/api/ice`, { signal: AbortSignal.timeout(8000) });
+    const body = response.ok ? await response.json() : null;
+    if (Array.isArray(body?.iceServers) && body.iceServers.length) return body.iceServers;
+  } catch {}
+  return [{ urls: "stun:stun.l.google.com:19302" }];
 }
-function bindChannel(channel) {
-  state.channels[channel.label] = channel;
-  channel.onmessage = async ({ data }) => {
-    if (["input-fast", "commands"].includes(channel.label)) {
-      toast("Le contrôle du système n’est pas autorisé depuis un hôte navigateur.");
-      return;
-    }
-    if (channel.label !== "file-transfer") return;
-    if (typeof data === "string") {
-      const message = JSON.parse(data);
-      if (message.type === "start") state.incomingFile = { name: message.name, size: message.size, chunks: [], received: 0 };
-      if (message.type === "end" && state.incomingFile) {
-        const url = URL.createObjectURL(new Blob(state.incomingFile.chunks));
-        const link = document.createElement("a");
-        link.href = url; link.download = state.incomingFile.name; link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        state.incomingFile = null; toast("Fichier reçu");
-      }
-    } else if (state.incomingFile) {
-      state.incomingFile.chunks.push(data); state.incomingFile.received += data.byteLength;
-      $("fileStatus").textContent = `${Math.round(state.incomingFile.received / state.incomingFile.size * 100)} % reçus`;
-    }
-  };
+
+async function sendOffer(peer, iceRestart = false) {
+  const offer = await peer.createOffer(iceRestart ? { iceRestart: true } : undefined);
+  await peer.setLocalDescription(offer);
+  socket.emit("signal", { code: state.code, data: { type: "offer", sdp: peer.localDescription } });
 }
+
 async function createPeer(isHost) {
-  state.peer?.close(); state.candidates = []; state.channels = {};
+  state.peer?.close();
+  state.candidates = [];
+  state.channels = {};
   const peer = new RTCPeerConnection({ iceServers: await iceServers(), bundlePolicy: "max-bundle" });
   state.peer = peer;
-  peer.onicecandidate = ({ candidate }) => candidate && socket.emit("signal", { code: state.code, data: { type: "candidate", candidate } });
-  peer.ondatachannel = ({ channel }) => bindChannel(channel);
+  peer.onicecandidate = ({ candidate }) => { if (candidate) socket.emit("signal", { code: state.code, data: { type: "candidate", candidate } }); };
+  peer.ondatachannel = ({ channel }) => { state.channels[channel.label] = channel; };
   if (isHost) {
-    bindChannel(peer.createDataChannel("input-fast", { ordered: false, maxRetransmits: 0 }));
-    bindChannel(peer.createDataChannel("commands", { ordered: true }));
-    bindChannel(peer.createDataChannel("file-transfer", { ordered: true }));
+    for (const [label, options] of [["input-fast", { ordered: false, maxRetransmits: 0 }], ["commands", { ordered: true }], ["file-transfer", { ordered: true }]]) {
+      state.channels[label] = peer.createDataChannel(label, options);
+    }
+  } else {
+    peer.ontrack = ({ streams }) => {
+      $("video").srcObject = streams[0];
+      $("videoLoader").hidden = true;
+      $("video").focus();
+    };
   }
-  peer.ontrack = ({ streams }) => {
-    $("video").srcObject = streams[0]; enterSession("Appareil distant");
-  };
   peer.onconnectionstatechange = () => {
-    setStatus(peer.connectionState === "connected" ? "Session active" : peer.connectionState);
-    if (peer.connectionState === "connected") {
-      if (isHost) enterSession("Partage en cours");
-      monitor(peer, isHost); toast("Connexion WebRTC établie");
+    const labels = { connecting: "Connexion…", connected: "Connecté", disconnected: "Connexion instable…", failed: "Reconnexion…", closed: "Terminé" };
+    $("sessionState").textContent = labels[peer.connectionState] || peer.connectionState;
+    if (peer.connectionState === "connected" && !state.startedAt) {
+      state.startedAt = Date.now();
+      const tick = () => { $("sessionDuration").textContent = formatDuration(Math.floor((Date.now() - state.startedAt) / 1000)); };
+      tick();
+      state.timers.duration = setInterval(tick, 1000);
+      monitor(peer, isHost);
+      if (isHost) $("videoLoader").hidden = true;
     }
     if (peer.connectionState === "failed") {
-      setStatus("Reconnexion WebRTC en cours…");
       peer.restartIce();
+      if (isHost) sendOffer(peer, true).catch(() => {});
     }
   };
   return peer;
 }
-function enterSession(name) {
-  showOnly("sessionPanel"); $("sessionDeviceName").textContent = name; $("videoLoader").hidden = true;
-  if (state.role === "host") $("video").srcObject = state.stream;
-  $("permissions").textContent = state.permissions.control ? "Contrôle autorisé" : "Lecture seule";
-  $("participants").innerHTML = "<span>● 1 participant connecté</span>";
-  startClock(); $("video").focus();
-}
+
 async function handleSignal(data) {
   if (!state.peer) return;
   if (data.type === "offer") {
     await state.peer.setRemoteDescription(data.sdp);
-    for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate);
-    const answer = await state.peer.createAnswer(); await state.peer.setLocalDescription(answer);
+    for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate).catch(() => {});
+    const answer = await state.peer.createAnswer();
+    await state.peer.setLocalDescription(answer);
     socket.emit("signal", { code: state.code, data: { type: "answer", sdp: state.peer.localDescription } });
   } else if (data.type === "answer") {
     await state.peer.setRemoteDescription(data.sdp);
-    for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate);
+    for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate).catch(() => {});
   } else if (data.type === "candidate") {
-    if (state.peer.remoteDescription) await state.peer.addIceCandidate(data.candidate); else state.candidates.push(data.candidate);
+    if (state.peer.remoteDescription) await state.peer.addIceCandidate(data.candidate);
+    else state.candidates.push(data.candidate);
   }
 }
-function end(emit = true) {
-  if (emit && state.code) socket.emit("end-session", { code: state.code });
-  clearInterval(state.statsTimer); clearInterval(state.durationTimer); clearInterval(state.expiryTimer);
-  state.peer?.close(); state.stream?.getTracks().forEach((track) => track.stop());
-  Object.assign(state, { role: null, peer: null, code: null, resumeToken: null, stream: null, candidates: [], channels: {}, startedAt: 0 });
-  $("video").srcObject = null; $("hostPreview").srcObject = null; $("hostCodeArea").hidden = true;
-  $("generateHostCode").disabled = true; $("regenerateHostCode").disabled = true; $("stopHosting").hidden = true;
-  showOnly("modePanel"); setStatus("Serveur connecté");
+
+function monitor(peer, isHost) {
+  clearInterval(state.timers.stats);
+  let last = { bytes: 0, at: performance.now() };
+  state.timers.stats = setInterval(async () => {
+    const report = await peer.getStats();
+    report.forEach((item) => {
+      if (item.type === (isHost ? "outbound-rtp" : "inbound-rtp") && item.kind === "video") {
+        const bytes = isHost ? item.bytesSent : item.bytesReceived;
+        const now = performance.now();
+        $("bitrate").textContent = `${Math.max(0, (bytes - last.bytes) * 8 / (now - last.at) / 1000).toFixed(1)} Mb/s`;
+        last = { bytes, at: now };
+        $("resolution").textContent = item.frameWidth ? `${item.frameWidth}×${item.frameHeight}` : "—";
+        $("fps").textContent = item.framesPerSecond ? String(Math.round(item.framesPerSecond)) : "—";
+        $("codec").textContent = report.get(item.codecId)?.mimeType?.split("/")[1] || "—";
+      }
+      if (item.type === "candidate-pair" && item.nominated && item.state === "succeeded") {
+        $("latency").textContent = `${Math.round((item.currentRoundTripTime || 0) * 1000)} ms`;
+        const relay = [report.get(item.localCandidateId), report.get(item.remoteCandidateId)].some((candidate) => candidate?.candidateType === "relay");
+        $("route").textContent = relay ? "Relais" : "Directe";
+      }
+    });
+  }, 1000);
 }
 
+/* ---------- Session ---------- */
+
+function enterSession(role, peerName) {
+  state.role = role;
+  state.startedAt = 0;
+  state.inputPaused = false;
+  showPanel("sessionPanel");
+  $("sessionPanel").classList.toggle("as-host", role === "host");
+  $("peerName").textContent = role === "host" ? `Vous montrez votre écran à ${peerName}` : peerName;
+  $("peerAvatar").textContent = initials(peerName);
+  $("sessionState").textContent = "Connexion…";
+  $("sessionDuration").textContent = "00:00:00";
+  $("messages").replaceChildren();
+  $("videoLoader").hidden = false;
+  if (role === "host") $("video").srcObject = state.stream;
+  setZoom(0);
+  updateTools();
+}
+
+function endSession(notifyPeer = true, reason = "Session terminée.") {
+  if (notifyPeer && state.code) socket.emit("end-session", { code: state.code });
+  for (const timer of Object.values(state.timers)) clearInterval(timer);
+  state.peer?.close();
+  const wasHost = state.role === "host";
+  Object.assign(state, { role: null, peer: null, code: null, resumeToken: null, candidates: [], channels: {}, startedAt: 0, side: null });
+  $("video").srcObject = null;
+  closeSide();
+  setPending(false);
+  if (wasHost) resetHost();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  showPanel("modePanel");
+  if (reason) toast(reason);
+}
+
+function updateTools() {
+  const { control, clipboard, files } = state.permissions;
+  const active = control && !state.inputPaused;
+  $("toggleControl").disabled = !control;
+  $("toggleControl").setAttribute("aria-pressed", String(active));
+  $("toggleControl").title = control ? (active ? "Suspendre le contrôle" : "Reprendre le contrôle") : "Le contrôle n’a pas été autorisé";
+  $("keysButton").disabled = !active;
+  $$('[data-panel="clipboard"]').forEach((button) => { button.disabled = !clipboard; });
+  $$('[data-panel="files"]').forEach((button) => { button.disabled = !files; });
+  if ((state.side === "clipboard" && !clipboard) || (state.side === "files" && !files)) closeSide();
+}
+
+function openSide(name) {
+  if (state.side === name) return closeSide();
+  state.side = name;
+  $("side").hidden = false;
+  $("sideTitle").textContent = { chat: "Discussion", files: "Fichiers", clipboard: "Presse-papiers", stats: "Qualité" }[name];
+  $$(".side-content").forEach((content) => { content.hidden = content.dataset.content !== name; });
+  $$("[data-panel]").forEach((button) => button.classList.toggle("active", button.dataset.panel === name));
+  if (name === "chat") { $$(".unread").forEach((dot) => { dot.hidden = true; }); $("message").focus(); }
+}
+
+function closeSide() {
+  state.side = null;
+  $("side").hidden = true;
+  $$("[data-panel]").forEach((button) => button.classList.remove("active"));
+}
+
+function addMessage(text, mine) {
+  if ($("messages").querySelector(".muted")) $("messages").replaceChildren();
+  const bubble = document.createElement("div");
+  bubble.className = `bubble${mine ? " mine" : ""}`;
+  bubble.textContent = String(text).slice(0, 2000);
+  $("messages").append(bubble);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  if (!mine && state.side !== "chat") { $$(".unread").forEach((dot) => { dot.hidden = false; }); toast(`Message : ${String(text).slice(0, 120)}`); }
+}
+
+function setZoom(level) {
+  state.zoom = level;
+  const video = $("video");
+  $("stage").classList.toggle("fit", level === 0);
+  $("stage").classList.toggle("zoomed", level !== 0);
+  $("zoomFit").setAttribute("aria-pressed", String(level === 0));
+  $("zoomLabel").textContent = level === 0 ? "Ajusté" : `${Math.round(level * 100)} %`;
+  video.style.width = level && video.videoWidth ? `${Math.round(video.videoWidth * level)}px` : "";
+  video.style.height = level && video.videoHeight ? `${Math.round(video.videoHeight * level)}px` : "";
+}
+
+/* ---------- Contrôle (aidant) ---------- */
+
+function videoPoint(event) {
+  const video = $("video");
+  const rect = video.getBoundingClientRect();
+  const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : rect.width / rect.height;
+  let width = rect.width;
+  let height = rect.height;
+  if (width / height > ratio) width = height * ratio; else height = width / ratio;
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left - (rect.width - width) / 2) / width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top - (rect.height - height) / 2) / height))
+  };
+}
+
+const canControl = () => state.role === "viewer" && state.permissions.control && !state.inputPaused && state.code;
+
+function sendPayload(payload) {
+  if (!canControl()) return;
+  const channel = state.channels[payload.type === "mousemove" ? "input-fast" : "commands"];
+  if (channel?.readyState === "open") channel.send(JSON.stringify(payload));
+  else socket.emit("remote-input", { code: state.code, payload });
+}
+
+const video = $("video");
+for (const type of ["mousedown", "mouseup"]) {
+  video.addEventListener(type, (event) => {
+    if (type === "mousedown") video.focus();
+    if (event.button > 2 || !canControl()) return;
+    event.preventDefault();
+    sendPayload({ type, ...videoPoint(event), button: event.button });
+  });
+}
+video.addEventListener("mousemove", (event) => sendPayload({ type: "mousemove", ...videoPoint(event) }));
+video.addEventListener("wheel", (event) => {
+  if (!canControl()) return;
+  event.preventDefault();
+  sendPayload({ type: "wheel", ...videoPoint(event), deltaY: Math.max(-10000, Math.min(10000, event.deltaY)) });
+}, { passive: false });
+video.addEventListener("keydown", (event) => {
+  if (!canControl()) return;
+  event.preventDefault();
+  sendPayload({ type: "keydown", key: event.key.slice(0, 40), code: event.code.slice(0, 40), ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey });
+});
+video.addEventListener("contextmenu", (event) => event.preventDefault());
+video.addEventListener("loadedmetadata", () => { if (state.zoom) setZoom(state.zoom); });
+
+/* ---------- Serveur ---------- */
+
 socket.on("connect", () => {
-  setStatus("Serveur connecté"); $("serverDot").classList.add("online");
+  setStatus("Serveur connecté");
+  $("serverDot").className = "dot online";
   if (state.code && state.resumeToken && state.role) socket.emit("resume-session", { code: state.code, resumeToken: state.resumeToken, role: state.role });
 });
-socket.on("disconnect", () => { setStatus("Reconnexion au serveur…"); $("serverDot").classList.remove("online"); });
+socket.on("disconnect", () => { setStatus("Reconnexion au serveur…"); $("serverDot").className = "dot warn"; });
+socket.on("connect_error", () => { setStatus("Serveur injoignable, nouvelle tentative…"); $("serverDot").className = "dot warn"; });
+
 socket.on("host-created", ({ code, expiresAt, resumeToken }) => {
-  state.code = code; state.resumeToken = resumeToken; $("hostCode").textContent = formatCode(code); $("hostCodeArea").hidden = false;
-  $("regenerateHostCode").disabled = false; $("stopHosting").hidden = false; startExpiry(expiresAt);
-  toast("Code de partage créé");
+  state.code = code;
+  state.resumeToken = resumeToken;
+  showHostWaiting(code, expiresAt);
 });
-socket.on("session-expired", () => { toast("Le code a expiré"); end(false); });
+socket.on("session-expired", () => { if (!state.peer) { resetHost(); state.code = null; toast("Le code a expiré."); } });
 socket.on("incoming-request", ({ viewerSocketId, deviceName }) => {
-  state.pendingViewer = viewerSocketId; $("webRequester").textContent = `${deviceName || "Un appareil"} souhaite se connecter`;
-  $("webRequestDialog").showModal();
+  state.pendingViewer = { id: viewerSocketId, name: deviceName || "Un appareil" };
+  $("requester").textContent = state.pendingViewer.name;
+  $("requestDialog").showModal();
 });
 socket.on("viewer-ready", async () => {
   if (!state.stream) return;
-  const peer = await createPeer(true); state.stream.getTracks().forEach((track) => peer.addTrack(track, state.stream));
-  const offer = await peer.createOffer(); await peer.setLocalDescription(offer);
-  socket.emit("signal", { code: state.code, data: { type: "offer", sdp: peer.localDescription } });
+  enterSession("host", state.pendingViewer?.name || "un appareil");
+  const peer = await createPeer(true);
+  for (const track of state.stream.getTracks()) {
+    if (track.kind === "video") track.contentHint = "detail";
+    peer.addTrack(track, state.stream);
+  }
+  await sendOffer(peer);
 });
-socket.on("viewer-approved", async ({ code, permissions, resumeToken }) => {
-  state.code = code; state.resumeToken = resumeToken; state.permissions = permissions; await createPeer(false);
-  setConnecting(true, "Autorisation reçue", "Négociation de la connexion WebRTC…");
+socket.on("viewer-approved", async ({ code, permissions, resumeToken, deviceName }) => {
+  if (state.code !== code || state.role !== "viewer") { socket.emit("end-session", { code }); return; }
+  state.resumeToken = resumeToken;
+  state.permissions = permissions;
+  setPending(false);
+  enterSession("viewer", deviceName || "Ordinateur distant");
+  await createPeer(false);
 });
-socket.on("viewer-denied", ({ reason }) => showError(reason));
-socket.on("host-unavailable", ({ reason }) => showError(reason));
-socket.on("peer-reconnecting", () => setStatus("Reconnexion en cours…"));
+socket.on("viewer-denied", ({ reason }) => { if (state.role === "viewer") { state.code = null; state.role = null; showError(reason); } });
+socket.on("host-unavailable", ({ reason }) => toast(reason));
+socket.on("peer-reconnecting", () => { $("sessionState").textContent = "Reconnexion de l’autre appareil…"; });
 socket.on("peer-resumed", async () => {
-  setStatus("Connexion rétablie");
-  if (state.peer && state.role === "host") {
-    state.peer.restartIce();
-    const offer = await state.peer.createOffer({ iceRestart: true });
-    await state.peer.setLocalDescription(offer);
-    socket.emit("signal", { code: state.code, data: { type: "offer", sdp: state.peer.localDescription } });
-  }
+  $("sessionState").textContent = "Connecté";
+  if (state.peer && state.role === "host") await sendOffer(state.peer, true).catch(() => {});
 });
-socket.on("session-resumed", () => toast("Session reprise"));
-socket.on("resume-denied", () => { toast("La période de reprise est terminée."); end(false); });
-socket.on("permissions-state", (permissions) => { state.permissions = permissions; $("permissions").textContent = permissions.control ? "Contrôle autorisé" : "Lecture seule"; });
-socket.on("signal", ({ data }) => handleSignal(data).catch(() => showError("La négociation WebRTC a échoué.")));
+socket.on("resume-denied", () => {
+  if (state.peer && ["connected", "connecting"].includes(state.peer.connectionState)) return toast("Le serveur a redémarré : l’image continue, le chat reviendra à la prochaine session.");
+  endSession(false, "La session a expiré.");
+});
+socket.on("permissions-state", (permissions) => { state.permissions = permissions; updateTools(); toast(permissions.control ? "Autorisations mises à jour." : "Le contrôle n’est pas autorisé."); });
+socket.on("signal", ({ data }) => handleSignal(data).catch(() => toast("La négociation de la connexion a échoué.")));
 socket.on("chat-message", ({ text }) => addMessage(text, false));
-socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Presse-papiers synchronisé"); });
-socket.on("session-ended", () => end(false));
-socket.on("viewer-left", () => { toast("Le participant a quitté la session"); $("participants").innerHTML = "<small>Aucun participant connecté</small>"; showOnly("hostPanel"); });
+socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Texte reçu dans le panneau Presse-papiers."); });
+socket.on("file-offer", ({ id, name, size }) => {
+  state.pendingFileOffer = { id, name };
+  $("fileOfferText").textContent = `${name} · ${formatBytes(size)}`;
+  $("fileDialog").showModal();
+});
+socket.on("file-decision", async ({ id, accepted }) => {
+  const file = $("file").files[0];
+  if (!accepted || !file || id !== `${file.name}:${file.size}`) { $("fileStatus").textContent = "Le fichier a été refusé."; return; }
+  $("fileStatus").textContent = "Envoi…";
+  socket.emit("file-data", { code: state.code, id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
+  $("fileStatus").textContent = `${file.name} envoyé.`;
+});
+socket.on("file-data", ({ name, type, data }) => {
+  const url = URL.createObjectURL(new Blob([data], { type: type || "application/octet-stream" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name || "fichier";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  $("fileStatus").textContent = `${name} téléchargé.`;
+  toast(`Fichier reçu : ${name}`);
+});
+socket.on("session-ended", () => {
+  if (state.peer) endSession(false, "L’autre personne a mis fin à la session.");
+  else if (state.role === "host") { resetHost(); state.code = null; }
+});
 
-$("openHost").onclick = () => { state.role = "host"; showOnly("hostPanel"); };
-$("openViewer").onclick = () => { state.role = "viewer"; showOnly("connectPanel"); };
-document.querySelectorAll("[data-back]").forEach((button) => button.onclick = () => end());
-$("selectDisplay").onclick = async () => {
-  try {
-    state.stream?.getTracks().forEach((track) => track.stop());
-    state.stream = await captureDisplay({ audio: $("webAudio").checked });
-    $("hostPreview").srcObject = state.stream; $("generateHostCode").disabled = false;
-    state.stream.getVideoTracks()[0].addEventListener("ended", () => end());
-    toast("Source sélectionnée");
-  } catch (error) { toast(error.name === "NotAllowedError" ? "Partage annulé." : error.message); }
-};
-function createHostCode() {
-  if (!state.stream) return toast("Choisissez d’abord un écran, une fenêtre ou un onglet.");
-  state.permissions = webPermissions();
-  socket.emit("host-create", { deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim(), permissions: state.permissions, durationMinutes: Number($("webDuration").value), available: true });
-  $("hostWaiting").textContent = "En attente d’une connexion…";
-}
-$("generateHostCode").onclick = createHostCode; $("regenerateHostCode").onclick = createHostCode;
-$("copyHostCode").onclick = () => navigator.clipboard.writeText(state.code).then(() => toast("Code copié"));
-$("stopHosting").onclick = () => end();
-$("webDeny").onclick = () => { socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: false }); $("webRequestDialog").close(); };
-$("webAccept").onclick = () => { state.permissions = webPermissions(); socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: true, permissions: state.permissions }); $("webRequestDialog").close(); $("hostWaiting").textContent = "Connexion en cours…"; };
+/* ---------- Interface ---------- */
+
+$("openViewer").onclick = () => { showPanel("connectPanel"); $("code").focus(); };
+$("openHost").onclick = () => showPanel("hostPanel");
+$$("[data-back]").forEach((button) => { button.onclick = () => { if (state.code) socket.emit("end-session", { code: state.code }); state.code = null; state.role = null; resetHost({ stopStream: true }); setPending(false); showPanel("modePanel"); }; });
 $("code").oninput = (event) => { event.target.value = formatCode(event.target.value); };
-$("connect").onclick = () => {
-  const value = $("code").value.replace(/\D/g, ""); if (value.length !== 9) return setStatus("Le code doit contenir neuf chiffres");
-  if (!socket.connected) return setStatus("Serveur injoignable, réessayez dans un instant");
-  state.code = value; state.role = "viewer"; socket.emit("viewer-request", { code: value, deviceName: `Navigateur ${navigator.userAgentData?.brands?.[0]?.brand || ""}`.trim() });
-  $("connectError").hidden = true; setConnecting(true); setStatus("Attente de l’autorisation…");
+$("connectForm").onsubmit = requestConnection;
+$("cancelConnect").onclick = () => { state.code = null; state.role = null; setPending(false); };
+$("selectDisplay").onclick = chooseDisplay;
+$("generateHostCode").onclick = createHostCode;
+$("regenerateHostCode").onclick = createHostCode;
+$("copyHostCode").onclick = () => navigator.clipboard.writeText(state.code || "").then(() => toast("Code copié."));
+$("stopHosting").onclick = () => { if (state.code) socket.emit("end-session", { code: state.code }); state.code = null; state.role = null; resetHost({ stopStream: true }); toast("Partage arrêté."); };
+let decided = false;
+$("requestDialog").addEventListener("close", () => {
+  if (!decided && state.pendingViewer) socket.emit("host-decision", { viewerSocketId: state.pendingViewer.id, approved: false });
+  decided = false;
+});
+$("deny").onclick = () => $("requestDialog").close();
+$("accept").onclick = () => {
+  decided = true;
+  state.permissions = hostPermissions();
+  socket.emit("host-decision", { viewerSocketId: state.pendingViewer.id, approved: true, permissions: state.permissions });
+  $("requestDialog").close();
 };
-$("cancelConnect").onclick = () => end(); $("retryConnect").onclick = () => { $("connectError").hidden = true; $("connect").click(); };
-$("leave").onclick = () => end(); $("fullscreen").onclick = () => $("stage").requestFullscreen();
-$("fit").onclick = () => { state.zoom = 1; updateZoom(); }; $("actual").onclick = () => { state.zoom = 1; $("video").style.maxWidth = "none"; updateZoom(); };
-$("zoomIn").onclick = () => { state.zoom = Math.min(3, state.zoom + .25); updateZoom(); }; $("zoomOut").onclick = () => { state.zoom = Math.max(.5, state.zoom - .25); updateZoom(); };
-function updateZoom() { $("video").style.transform = `scale(${state.zoom})`; $("zoomLabel").textContent = `${Math.round(state.zoom * 100)} %`; }
-$("audio").onclick = () => toast("L’audio dépend de la source choisie et du navigateur.");
-document.querySelectorAll("[data-drawer]").forEach((button) => button.onclick = () => {
-  $("drawer").classList.add("open"); document.querySelectorAll(".drawer-panel").forEach((panel) => panel.classList.toggle("active", panel.id === button.dataset.drawer));
-});
-$("closeDrawer").onclick = () => $("drawer").classList.remove("open");
-function addMessage(text, mine) {
-  const line = document.createElement("div"); line.textContent = text; if (mine) line.className = "mine"; $("messages").append(line);
-}
-$("sendMessage").onclick = () => { const text = $("message").value.trim(); if (text && state.code) { socket.emit("chat-message", { code: state.code, text }); addMessage(text, true); } $("message").value = ""; };
-$("sendClipboard").onclick = () => { if (!state.permissions.clipboard) return toast("Presse-papiers non autorisé."); socket.emit("clipboard-share", { code: state.code, text: $("clipboard").value }); };
-$("sendFile").onclick = async () => {
-  const file = $("file").files[0], channel = state.channels["file-transfer"];
-  if (!state.permissions.files || !file || channel?.readyState !== "open") return toast("Canal fichier indisponible.");
-  if (file.size > 25 * 1024 * 1024) return toast("Le fichier dépasse 25 Mo.");
-  channel.send(JSON.stringify({ type: "start", name: file.name, size: file.size }));
-  for (let offset = 0; offset < file.size; offset += 64 * 1024) {
-    while (channel.bufferedAmount > 4 * 1024 * 1024) await new Promise((resolve) => setTimeout(resolve, 20));
-    channel.send(await file.slice(offset, offset + 64 * 1024).arrayBuffer());
-    $("fileStatus").textContent = `${Math.round(Math.min(file.size, offset + 64 * 1024) / file.size * 100)} % envoyés`;
-  }
-  channel.send(JSON.stringify({ type: "end" }));
-};
-function videoPoint(event) {
-  const rect = $("video").getBoundingClientRect(); return { x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)) };
-}
-for (const type of ["mousemove", "mousedown", "mouseup"]) $("video").addEventListener(type, (event) => {
-  if (state.role !== "viewer" || !state.permissions.control || !state.code) return;
-  const payload = { type, ...videoPoint(event), ...(type === "mousemove" ? {} : { button: event.button }) };
-  const channel = state.channels[type === "mousemove" ? "input-fast" : "commands"];
-  if (channel?.readyState === "open") channel.send(JSON.stringify(payload)); else socket.emit("remote-input", { code: state.code, payload });
-});
-$("video").addEventListener("keydown", (event) => {
-  if (state.role !== "viewer" || !state.permissions.control || !state.code) return;
-  event.preventDefault(); const payload = { type: "keydown", key: event.key, code: event.code, ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey };
-  if (state.channels.commands?.readyState === "open") state.channels.commands.send(JSON.stringify(payload)); else socket.emit("remote-input", { code: state.code, payload });
-});
-$("video").addEventListener("contextmenu", (event) => event.preventDefault());
-function monitor(peer, host) {
-  clearInterval(state.statsTimer); let lastBytes = 0, lastAt = performance.now();
-  state.statsTimer = setInterval(async () => {
-    const report = await peer.getStats();
-    report.forEach((item) => {
-      if (item.type === (host ? "outbound-rtp" : "inbound-rtp") && item.kind === "video") {
-        $("resolution").textContent = `${item.frameWidth || 0}×${item.frameHeight || 0}`; $("codec").textContent = report.get(item.codecId)?.mimeType?.split("/")[1] || "—";
-        const bytes = host ? item.bytesSent : item.bytesReceived, now = performance.now();
-        const mbps = Math.max(0, (bytes - lastBytes) * 8 / (now - lastAt) / 1000); lastBytes = bytes; lastAt = now;
-        $("networkTop").textContent = mbps > 3 ? "Excellente" : mbps > 1 ? "Bonne" : "Limitée";
-      }
-      if (item.type === "candidate-pair" && item.state === "succeeded") { $("latency").textContent = `${Math.round((item.currentRoundTripTime || 0) * 1000)} ms`; $("network").textContent = report.get(item.remoteCandidateId)?.candidateType === "relay" ? "TURN" : "Directe"; }
-    });
-  }, 1500);
-}
 
-$("capabilityNotice").textContent = platform.displayCapture ? "✓ Partage d’écran disponible. Le contrôle système nécessite l’application Windows." : "⚠ Ce navigateur ne permet pas le partage d’écran.";
-if (!platform.displayCapture) $("openHost").disabled = true;
+$("toggleControl").onclick = () => { state.inputPaused = !state.inputPaused; updateTools(); if (!state.inputPaused) video.focus(); };
+$("keysButton").onclick = () => {
+  const open = $("keysMenu").hidden;
+  $("keysMenu").hidden = !open;
+  $("keysButton").setAttribute("aria-expanded", String(open));
+};
+$$("[data-combo]").forEach((button) => {
+  button.onclick = () => {
+    sendPayload({ type: "keydown", ctrl: false, shift: false, alt: false, meta: false, ...COMBOS[button.dataset.combo] });
+    $("keysMenu").hidden = true;
+    $("keysButton").setAttribute("aria-expanded", "false");
+    video.focus();
+  };
+});
+document.addEventListener("click", (event) => { if (!event.target.closest(".menu-wrap")) $("keysMenu").hidden = true; });
+$("zoomFit").onclick = () => setZoom(0);
+$("zoomLabel").onclick = () => setZoom(1);
+$("zoomIn").onclick = () => setZoom(Math.min(2.5, (state.zoom || 1) + 0.25));
+$("zoomOut").onclick = () => setZoom(Math.max(0.25, (state.zoom || 1) - 0.25));
+$("fullscreen").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $("stage").requestFullscreen()).catch(() => {});
+$("leave").onclick = () => endSession(true, "Vous avez quitté la session.");
+$$("[data-panel]").forEach((button) => { button.onclick = () => openSide(button.dataset.panel); });
+$("closeSide").onclick = closeSide;
+$("chatForm").onsubmit = (event) => {
+  event.preventDefault();
+  const text = $("message").value.trim();
+  if (!text || !state.code) return;
+  socket.emit("chat-message", { code: state.code, text });
+  addMessage(text, true);
+  $("message").value = "";
+};
+$("file").onchange = () => { const file = $("file").files[0]; $("fileLabel").textContent = file ? `${file.name} · ${formatBytes(file.size)}` : "Choisir un fichier"; };
+$("sendFile").onclick = () => {
+  const file = $("file").files[0];
+  if (!file) return toast("Choisissez d’abord un fichier.");
+  if (file.size > MAX_FILE_SIZE) return toast("Le fichier dépasse 25 Mo.");
+  socket.emit("file-offer", { code: state.code, id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size });
+  $("fileStatus").textContent = "En attente de l’accord de l’autre personne…";
+};
+const decideFile = (accepted) => {
+  if (!state.pendingFileOffer) return;
+  socket.emit("file-decision", { code: state.code, id: state.pendingFileOffer.id, accepted });
+  $("fileStatus").textContent = accepted ? "Réception…" : "Fichier refusé.";
+  state.pendingFileOffer = null;
+  $("fileDialog").close();
+};
+$("acceptFile").onclick = () => decideFile(true);
+$("rejectFile").onclick = () => decideFile(false);
+$("pasteClipboard").onclick = () => navigator.clipboard.readText().then((text) => { $("clipboard").value = text; }).catch(() => toast("Le navigateur a refusé l’accès au presse-papiers."));
+$("copyClipboard").onclick = () => navigator.clipboard.writeText($("clipboard").value).then(() => toast("Texte copié."));
+$("sendClipboard").onclick = () => {
+  if (!$("clipboard").value) return toast("Le texte est vide.");
+  socket.emit("clipboard-share", { code: state.code, text: $("clipboard").value });
+  toast("Texte envoyé.");
+};
+
+/* ---------- Compatibilité ---------- */
+
+if (!platform.displayCapture) {
+  $("openHost").disabled = true;
+  $("capabilityNotice").textContent = "Ce navigateur ne permet pas de montrer son écran. Vous pouvez quand même aider quelqu’un.";
+}
 if (!signalUrl) {
-  // Sans serveur public, aucune session ne peut aboutir : on le dit clairement au lieu d’attendre indéfiniment.
+  // Sans serveur public, aucune session ne peut aboutir : on le dit clairement.
   setStatus("Serveur public à configurer");
-  $("capabilityNotice").textContent = "⚠ Le serveur de connexion n’est pas encore configuré : utilisez l’application Windows en attendant.";
+  $("capabilityNotice").textContent = "Le serveur de connexion n’est pas encore configuré : utilisez l’application Windows en attendant.";
+  $("capabilityNotice").className = "notice warn";
   $("openHost").disabled = true;
   $("openViewer").disabled = true;
 }
-if (!window.RTCPeerConnection || !window.WebSocket) { setStatus("Navigateur incompatible"); $("openHost").disabled = true; $("openViewer").disabled = true; }
+if (!window.RTCPeerConnection || !window.WebSocket) {
+  setStatus("Navigateur incompatible");
+  $("openHost").disabled = true;
+  $("openViewer").disabled = true;
+}
