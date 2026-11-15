@@ -112,10 +112,29 @@ function createHostCode() {
   socket.emit("host-create", { deviceName: DEVICE_NAME, permissions: state.permissions, durationMinutes: Number($("webDuration").value), available: true });
 }
 
+function drawQr(canvas, text) {
+  if (typeof window.qrcode !== "function") return;
+  const qr = window.qrcode(0, "M");
+  qr.addData(text);
+  qr.make();
+  const count = qr.getModuleCount();
+  const cell = canvas.width / (count + 4);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#0b1020";
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      if (qr.isDark(row, col)) ctx.fillRect(Math.floor((col + 2) * cell), Math.floor((row + 2) * cell), Math.ceil(cell), Math.ceil(cell));
+    }
+  }
+}
+
 function showHostWaiting(code, expiresAt) {
   $("hostSetup").hidden = true;
   $("hostWaiting").hidden = false;
   $("hostCode").textContent = formatCode(code);
+  drawQr($("hostQr"), `${location.origin}${location.pathname}?code=${code}`);
   clearInterval(state.timers.expiry);
   if (!expiresAt) { $("hostExpiry").textContent = "Valable sans limite"; return; }
   const tick = () => {
@@ -191,6 +210,7 @@ async function createPeer(isHost) {
       remoteStream.addTrack(track);
       if (track.kind === "audio") { track.onunmute = () => { $("toggleSound").hidden = false; }; return; }
       $("videoLoader").hidden = true;
+      $("video").play().catch(() => { $("tapToPlay").hidden = false; });
       $("video").focus();
     };
   }
@@ -276,7 +296,10 @@ function enterSession(role, peerName) {
   $("videoLoader").hidden = false;
   $("screensWrap").hidden = true;
   $("toggleSound").hidden = true;
-  setSound(true);
+  $("tapToPlay").hidden = true;
+  // Les navigateurs (surtout sur téléphone) refusent la lecture automatique avec son :
+  // l'image démarre sans son, un appui sur « Son » l'active.
+  setSound(false);
   if (role === "host") { $("video").srcObject = state.stream; $("video").muted = true; }
   setZoom(0);
   updateTools();
@@ -602,7 +625,8 @@ function toggleMenu(menu, button) {
 }
 $("keysButton").onclick = () => toggleMenu("keysMenu", "keysButton");
 $("screensButton").onclick = () => toggleMenu("screensMenu", "screensButton");
-$("toggleSound").onclick = () => setSound(video.muted);
+$("toggleSound").onclick = () => { setSound(video.muted); video.play().catch(() => {}); };
+$("tapToPlay").onclick = () => { video.play().then(() => { $("tapToPlay").hidden = true; }).catch(() => {}); };
 $$("[data-combo]").forEach((button) => {
   button.onclick = () => {
     sendPayload({ type: "keydown", ctrl: false, shift: false, alt: false, meta: false, ...COMBOS[button.dataset.combo] });
@@ -672,6 +696,58 @@ if (!signalUrl) {
   $("openHost").disabled = true;
   $("openViewer").disabled = true;
 }
+// Lien ou QR code « ?code=123456789 » : on se connecte directement.
+const linkedCode = new URLSearchParams(location.search).get("code")?.replace(/\D/g, "");
+if (linkedCode?.length === 9 && signalUrl) {
+  history.replaceState(null, "", location.pathname);
+  showPanel("connectPanel");
+  $("code").value = formatCode(linkedCode);
+  const go = () => $("connectForm").requestSubmit();
+  if (socket.connected) go(); else { setPending(true, "Connexion au serveur…", "Le serveur peut mettre jusqu’à une minute à démarrer."); socket.once("connect", () => { setPending(false); go(); }); }
+}
+
+// Téléphone : un toucher = un clic ; « Taper » ouvre le clavier et envoie les caractères.
+let touchStart = null;
+video.addEventListener("touchstart", (event) => {
+  if (!canControl() || event.touches.length !== 1) return;
+  event.preventDefault();
+  const touch = event.touches[0];
+  touchStart = { x: touch.clientX, y: touch.clientY, at: Date.now() };
+  sendPayload({ type: "mousemove", ...videoPoint(touch) });
+}, { passive: false });
+video.addEventListener("touchmove", (event) => {
+  if (!canControl() || !touchStart || event.touches.length !== 1) return;
+  event.preventDefault();
+  const touch = event.touches[0];
+  if (!touchStart.dragging && Math.hypot(touch.clientX - touchStart.x, touch.clientY - touchStart.y) > 12) {
+    touchStart.dragging = true;
+    sendPayload({ type: "mousedown", ...videoPoint({ clientX: touchStart.x, clientY: touchStart.y }), button: 0 });
+  }
+  sendPayload({ type: "mousemove", ...videoPoint(touch) });
+}, { passive: false });
+video.addEventListener("touchend", (event) => {
+  if (!canControl() || !touchStart) return;
+  event.preventDefault();
+  const touch = event.changedTouches[0];
+  const point = videoPoint(touch);
+  const longPress = !touchStart.dragging && Date.now() - touchStart.at > 550;
+  if (!touchStart.dragging) sendPayload({ type: "mousedown", ...point, button: longPress ? 2 : 0 });
+  sendPayload({ type: "mouseup", ...point, button: longPress ? 2 : 0 });
+  touchStart = null;
+}, { passive: false });
+$("mobileKeyboard").onclick = () => { $("mobileInput").value = ""; $("mobileInput").focus(); };
+$("mobileInput").addEventListener("input", (event) => {
+  const text = event.target.value;
+  for (const char of [...text]) sendPayload({ type: "keydown", key: char, code: "", ctrl: false, shift: false, alt: false, meta: false });
+  event.target.value = "";
+});
+$("mobileInput").addEventListener("keydown", (event) => {
+  if (["Backspace", "Enter", "Tab", "Escape", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+    event.preventDefault();
+    sendPayload({ type: "keydown", key: event.key, code: event.key, ctrl: false, shift: false, alt: false, meta: false });
+  }
+});
+
 if (!window.RTCPeerConnection || !window.WebSocket) {
   setStatus("Navigateur incompatible");
   $("openHost").disabled = true;

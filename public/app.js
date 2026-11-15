@@ -354,10 +354,34 @@ function createHostCode() {
   });
 }
 
+// QR code dessiné sur un canvas (compatible avec la politique de sécurité de la page).
+function drawQr(canvas, text) {
+  if (typeof window.qrcode !== "function") return false;
+  const qr = window.qrcode(0, "M");
+  qr.addData(text);
+  qr.make();
+  const count = qr.getModuleCount();
+  const margin = 2;
+  const size = canvas.width;
+  const cell = size / (count + margin * 2);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = "#0b1020";
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      if (qr.isDark(row, col)) ctx.fillRect(Math.floor((col + margin) * cell), Math.floor((row + margin) * cell), Math.ceil(cell), Math.ceil(cell));
+    }
+  }
+  return true;
+}
+
 function showHostWaiting(code, expiresAt) {
   $("hostSetup").hidden = true;
   $("hostWaiting").hidden = false;
   $("hostCode").textContent = formatCode(code);
+  // Le serveur public sert aussi la version web : le téléphone utilise donc le même serveur.
+  $("qrBlock").hidden = isLocalServer(state.serverUrl) || !drawQr($("hostQr"), `${new URL(state.serverUrl).origin}/remote?code=${code}`);
   $("hostWaitingText").textContent = state.available ? "En attente d’une demande de connexion…" : "Indisponible : les demandes sont refusées.";
   clearInterval(state.timers.code);
   if (!expiresAt) {

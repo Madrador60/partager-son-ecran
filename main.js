@@ -14,6 +14,11 @@ const { createIceServers } = require("./src/server/turn/ice-config");
 const { startEmbeddedServer, stopEmbeddedServer } = require("./src/main/embedded-server");
 const { planKeydown, buttonName } = require("./src/main/remote-input");
 
+// Chromium remplace les IP locales par des noms « .local » (mDNS). Entre deux PC d'une
+// même box, cette résolution échoue souvent et la connexion reste bloquée : l'application
+// étant utilisée entre personnes qui se font confiance, on expose les adresses locales.
+app.commandLine.appendSwitch("disable-features", "WebRtcHideLocalIpsWithMdns");
+
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let window;
 let splash;
