@@ -4,7 +4,7 @@ const { autoUpdater } = require("electron-updater");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 const { createReadStream } = require("node:fs");
-const { createHash } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const os = require("node:os");
 const { pathToFileURL } = require("node:url");
 const { z } = require("zod");
@@ -228,6 +228,7 @@ app.whenReady().then(async () => {
 });
 app.on("before-quit", () => {
   app.isQuiting = true;
+  for (const id of transfers.keys()) abortTransfer(id);
   stopEmbeddedServer(embeddedServer).catch(() => {});
 });
 app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
@@ -424,6 +425,64 @@ trustedIpc.handle("save-file", async (_event, file = {}) => {
   await fs.writeFile(result.filePath, data);
   return { ok: true, path: result.filePath };
 });
+// Gros fichiers : reçus par morceaux et écrits directement sur le disque.
+const MAX_TRANSFER_BYTES = 2 * 1024 ** 3;
+const transfers = new Map();
+const TransferBegin = z.object({ name: z.string().min(1).max(200), size: z.number().int().positive().max(MAX_TRANSFER_BYTES) }).strict();
+const TransferId = z.string().uuid();
+
+async function abortTransfer(id) {
+  const transfer = transfers.get(id);
+  if (!transfer) return;
+  transfers.delete(id);
+  await transfer.handle.close().catch(() => {});
+  await fs.rm(transfer.path, { force: true }).catch(() => {});
+}
+
+trustedIpc.handle("file-begin", async (_event, value = {}) => {
+  const { name, size } = TransferBegin.parse(value);
+  const safeName = path.basename(name).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_") || "fichier";
+  const result = await dialog.showSaveDialog(window, { defaultPath: path.join(app.getPath("downloads"), safeName) });
+  if (result.canceled || !result.filePath) return { ok: false };
+  const id = randomUUID();
+  transfers.set(id, { handle: await fs.open(result.filePath, "w"), path: result.filePath, size, written: 0 });
+  return { ok: true, transferId: id, path: result.filePath };
+});
+trustedIpc.handle("file-chunk", async (_event, value = {}) => {
+  const id = TransferId.parse(value.transferId);
+  const transfer = transfers.get(id);
+  if (!transfer) return { ok: false, error: "TRANSFER_UNKNOWN" };
+  const data = Buffer.from(z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]).parse(value.data));
+  if (transfer.written + data.length > transfer.size) {
+    await abortTransfer(id);
+    return { ok: false, error: "TRANSFER_TOO_LARGE" };
+  }
+  await transfer.handle.write(data);
+  transfer.written += data.length;
+  return { ok: true, written: transfer.written };
+});
+trustedIpc.handle("file-end", async (_event, value = {}) => {
+  const id = TransferId.parse(value.transferId);
+  const transfer = transfers.get(id);
+  if (!transfer) return { ok: false, error: "TRANSFER_UNKNOWN" };
+  if (transfer.written !== transfer.size) {
+    await abortTransfer(id);
+    return { ok: false, error: "TRANSFER_INCOMPLETE" };
+  }
+  transfers.delete(id);
+  await transfer.handle.close();
+  return { ok: true, path: transfer.path };
+});
+trustedIpc.handle("file-abort", async (_event, value = {}) => {
+  await abortTransfer(TransferId.parse(value.transferId));
+  return { ok: true };
+});
+trustedIpc.handle("show-in-folder", (_event, value) => {
+  const filePath = z.string().max(1000).parse(value);
+  shell.showItemInFolder(filePath);
+  return { ok: true };
+});
+
 trustedIpc.handle("get-signal-url", () => defaultSignalUrl() || embeddedServer?.url || "");
 trustedIpc.handle("get-embedded-signal-url", () => embeddedServer?.url || "");
 trustedIpc.handle("get-ice-servers", async (_event, serverUrl) => {

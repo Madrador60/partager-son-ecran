@@ -5,7 +5,9 @@ const $ = (id) => document.getElementById(id);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
 const KEYS = { server: "madrador.server", history: "madrador.history", recents: "madrador.recents", prefs: "madrador.prefs" };
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // via le serveur (ancien protocole)
+const MAX_DIRECT_FILE_SIZE = 2 * 1024 ** 3; // en direct entre les deux PC
+const CHUNK_SIZE = 64 * 1024;
 // Profils réellement appliqués à l'encodeur WebRTC de l'hôte.
 const QUALITY = {
   sharp: { maxBitrate: 8_000_000, maxFramerate: 30, hint: "detail", degradation: "maintain-resolution" },
@@ -35,6 +37,7 @@ const prefs = Object.assign({
   quality: "sharp",
   duration: 0,
   permissions: { control: true, clipboard: true, files: false },
+  shareAudio: false,
   notifications: true,
   launchAtStartup: false
 }, readJson(KEYS.prefs, {}));
@@ -48,7 +51,11 @@ const state = {
   peer: null,
   stream: null,
   sourceName: "",
+  sourceId: null,
   selectedBounds: null,
+  screens: [],
+  transferOut: null,
+  transferIn: null,
   hostCode: null,
   remoteCode: null,
   resumeToken: null,
@@ -262,23 +269,72 @@ async function openSourcePicker() {
 }
 
 async function selectSource(source, label) {
-  const stream = await captureDisplay({ bridge, sourceId: source.id });
-  state.stream?.getTracks().forEach((track) => track.stop());
+  const stream = await captureDisplay({ bridge, sourceId: source.id, audio: prefs.shareAudio && source.id.startsWith("screen:") });
+  const previous = state.stream;
   state.stream = stream;
   state.sourceName = label;
+  state.sourceId = source.id;
+  state.lastSource = source;
   state.selectedBounds = source.bounds;
   $("sourcePreview").srcObject = stream;
   $("sourcePreview").hidden = false;
   $("sourceEmpty").hidden = true;
   $("chooseSource").classList.add("has-source");
   $("sourceName").textContent = `${label} · cliquez pour changer`;
-  $("sourceDialog").close();
-  // Si une session est déjà en cours, remplacer la piste sans renégocier.
-  const sender = state.peer?.getSenders().find((item) => item.track?.kind === "video");
-  if (sender) {
-    await sender.replaceTrack(stream.getVideoTracks()[0]);
+  if ($("sourceDialog").open) $("sourceDialog").close();
+  // Si une session est déjà en cours, remplacer les pistes sans renégocier.
+  if (state.peer) {
+    for (const kind of ["video", "audio"]) {
+      const transceiver = state.peer.getTransceivers().find((item) => item.receiver.track?.kind === kind);
+      const track = stream.getTracks().find((item) => item.kind === kind) || null;
+      if (transceiver) await transceiver.sender.replaceTrack(track);
+    }
     $("localVideo").srcObject = stream;
     await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+    applyQuality();
+    sendScreens();
+  }
+  previous?.getTracks().forEach((track) => track.stop());
+}
+
+// Liste des écrans envoyée à l'aidant pour qu'il puisse changer d'écran lui-même.
+async function sendScreens() {
+  const channel = state.channels.commands;
+  if (state.role !== "host" || channel?.readyState !== "open") return;
+  const sources = await bridge.listSources().catch(() => []);
+  state.screens = sources.filter((source) => source.id.startsWith("screen:")).map((source, index) => ({
+    id: source.id,
+    bounds: source.bounds,
+    label: `${source.display?.primary ? "Écran principal" : `Écran ${index + 1}`}${source.display ? ` · ${source.display.resolution.width}×${source.display.resolution.height}` : ""}`
+  }));
+  channel.send(JSON.stringify({ type: "screens", current: state.sourceId, screens: state.screens.map(({ id, label }) => ({ id, label })) }));
+}
+
+async function handleCommand(message) {
+  if (message.type === "select-screen") {
+    if (!state.permissions.control) return;
+    const screen = state.screens.find((item) => item.id === message.id);
+    if (screen) await selectSource(screen, screen.label).catch((error) => notify(error.message, "error", "Changement d’écran impossible"));
+    return;
+  }
+  await bridge.sendRemoteInput(message);
+}
+
+function renderScreens({ screens, current }) {
+  $("screensWrap").hidden = !Array.isArray(screens) || screens.length < 2;
+  $("screensMenu").replaceChildren();
+  for (const screen of screens || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.textContent = String(screen.label).slice(0, 80);
+    button.classList.toggle("current", screen.id === current);
+    button.onclick = () => {
+      state.channels.commands?.send(JSON.stringify({ type: "select-screen", id: screen.id }));
+      $("screensMenu").hidden = true;
+      $("remoteVideo").focus();
+    };
+    $("screensMenu").append(button);
   }
 }
 
@@ -426,8 +482,15 @@ async function createPeer(isHost) {
     }
   };
   if (!isHost) {
-    peer.ontrack = ({ streams }) => {
-      $("remoteVideo").srcObject = streams[0];
+    // Un seul flux local regroupe l'image et le son, quel que soit l'ordre d'arrivée.
+    const remoteStream = new MediaStream();
+    $("remoteVideo").srcObject = remoteStream;
+    peer.ontrack = ({ track }) => {
+      remoteStream.addTrack(track);
+      if (track.kind === "audio") {
+        track.onunmute = () => { $("toggleSound").hidden = false; };
+        return;
+      }
       $("stageOverlay").hidden = true;
       updateControlUi();
       $("remoteVideo").focus();
@@ -435,13 +498,18 @@ async function createPeer(isHost) {
   }
   const bindChannel = (channel) => {
     state.channels[channel.label] = channel;
+    channel.binaryType = "arraybuffer";
+    if (channel.label === "commands" && isHost) channel.onopen = () => sendScreens();
     channel.onmessage = async ({ data }) => {
-      if (channel.label === "input-fast" || channel.label === "commands") {
-        if (state.role !== "host") return;
-        try { await bridge.sendRemoteInput(JSON.parse(data)); } catch (error) { console.warn(error); }
-      } else if (channel.label === "file-transfer") {
-        await receiveFileChunk(data);
-      }
+      try {
+        if (channel.label === "input-fast" || channel.label === "commands") {
+          const message = JSON.parse(data);
+          if (state.role === "host") await handleCommand(message);
+          else if (message.type === "screens") renderScreens(message);
+        } else if (channel.label === "file-transfer") {
+          await receiveFileChunk(data);
+        }
+      } catch (error) { console.warn(error); }
     };
   };
   peer.ondatachannel = ({ channel }) => bindChannel(channel);
@@ -453,25 +521,101 @@ async function createPeer(isHost) {
   return peer;
 }
 
+/* ---------- Fichiers ---------- */
+
+function showProgress(name, done, total, startedAt, verb) {
+  $("fileProgress").hidden = false;
+  $("fileProgressName").textContent = name;
+  const percent = total ? Math.floor(done / total * 100) : 0;
+  $("fileProgressPercent").textContent = `${percent} %`;
+  $("fileProgressBar").value = percent;
+  const seconds = Math.max(0.5, (performance.now() - startedAt) / 1000);
+  const speed = done / seconds;
+  const remaining = speed > 0 ? Math.ceil((total - done) / speed) : 0;
+  const eta = done < total ? ` · ${remaining < 60 ? `${remaining} s` : `${Math.ceil(remaining / 60)} min`} restantes` : "";
+  $("fileProgressDetail").textContent = `${verb} ${formatBytes(done)} sur ${formatBytes(total)} · ${formatBytes(speed)}/s${eta}`;
+}
+
+function finishTransfer(message, path = null) {
+  $("fileProgress").hidden = true;
+  $("fileStatus").textContent = message;
+  $("showReceivedFile").hidden = !path;
+  $("showReceivedFile").dataset.path = path || "";
+}
+
+async function streamFile(file, id) {
+  const channel = state.channels["file-transfer"];
+  const transfer = { id, cancelled: false };
+  state.transferOut = transfer;
+  const startedAt = performance.now();
+  channel.bufferedAmountLowThreshold = 1024 * 1024;
+  channel.send(JSON.stringify({ type: "start", id, name: file.name, size: file.size }));
+  for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+    if (transfer.cancelled || channel.readyState !== "open") {
+      state.transferOut = null;
+      return finishTransfer("Envoi interrompu.");
+    }
+    if (channel.bufferedAmount > 8 * 1024 * 1024) await new Promise((resolve) => { channel.onbufferedamountlow = resolve; });
+    channel.send(await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer());
+    if (offset % (CHUNK_SIZE * 16) === 0) showProgress(file.name, offset, file.size, startedAt, "Envoyé");
+  }
+  channel.send(JSON.stringify({ type: "end", id }));
+  state.transferOut = null;
+  finishTransfer(`${file.name} envoyé (${formatBytes(file.size)}).`);
+}
+
 async function receiveFileChunk(data) {
+  const transfer = state.transferIn;
   if (typeof data === "string") {
     const message = JSON.parse(data);
-    if (message.type === "start") state.incomingFile = { name: message.name, size: message.size, chunks: [], received: 0 };
-    if (message.type === "end" && state.incomingFile) {
-      const blob = new Blob(state.incomingFile.chunks);
-      const result = await bridge.saveReceivedFile({ name: state.incomingFile.name, data: await blob.arrayBuffer() });
-      $("fileStatus").textContent = result.ok ? `Enregistré : ${result.path}` : "Enregistrement annulé.";
-      state.incomingFile = null;
+    if (!transfer || message.id !== transfer.offerId) return;
+    if (message.type === "start") transfer.startedAt = performance.now();
+    if (message.type === "end") {
+      transfer.queue = transfer.queue.then(async () => {
+        const result = await bridge.fileEnd({ transferId: transfer.transferId });
+        if (state.transferIn === transfer) state.transferIn = null;
+        if (result.ok) {
+          finishTransfer(`Enregistré : ${result.path}`, result.path);
+          notify(transfer.name, "success", "Fichier reçu");
+        } else finishTransfer("Le fichier reçu est incomplet : il a été supprimé.");
+      });
     }
-  } else if (state.incomingFile) {
-    state.incomingFile.chunks.push(data);
-    state.incomingFile.received += data.byteLength;
-    $("fileStatus").textContent = `Réception : ${Math.round(state.incomingFile.received / state.incomingFile.size * 100)} %`;
+    return;
   }
+  if (!transfer) return;
+  transfer.received += data.byteLength;
+  const received = transfer.received;
+  transfer.queue = transfer.queue.then(async () => {
+    const result = await bridge.fileChunk({ transferId: transfer.transferId, data });
+    if (!result.ok) throw new Error(result.error);
+    if (received === transfer.size || received % (CHUNK_SIZE * 16) === 0) showProgress(transfer.name, received, transfer.size, transfer.startedAt, "Reçu");
+  }).catch(() => {
+    if (state.transferIn === transfer) state.transferIn = null;
+    finishTransfer("Réception interrompue.");
+  });
+}
+
+async function abortTransfers() {
+  if (state.transferOut) state.transferOut.cancelled = true;
+  if (state.transferIn) await bridge.fileAbort({ transferId: state.transferIn.transferId }).catch(() => {});
+  state.transferIn = null;
+  state.transferOut = null;
+  $("fileProgress").hidden = true;
+}
+
+// Les messages arrivés avant la création de la connexion (récupération TURN en cours)
+// sont gardés puis rejoués : sinon l'offre est perdue et la session reste bloquée.
+const earlySignals = [];
+
+async function drainEarlySignals() {
+  for (const payload of earlySignals.splice(0)) await handleSignal(payload).catch((error) => console.warn(error));
 }
 
 async function handleSignal({ data }) {
-  if (!state.peer) return;
+  if (!state.peer) {
+    if ((state.remoteCode || state.hostCode) && earlySignals.length < 200) earlySignals.push({ data });
+    return;
+  }
   if (data.type === "offer") {
     await state.peer.setRemoteDescription(data.sdp);
     await flushCandidates();
@@ -524,6 +668,9 @@ function enterSession(role) {
     $("stageOverlay").hidden = false;
     $("stageOverlayText").textContent = "Connexion à l’écran distant…";
     state.inputPaused = false;
+    $("screensWrap").hidden = true;
+    $("toggleSound").hidden = true;
+    setSound(true);
     setZoom(0);
   } else {
     $("hostPeerName").textContent = state.pendingViewerName || "un ordinateur";
@@ -539,6 +686,7 @@ async function endSession({ notifyPeer = true, reason = "Session terminée." } =
   const role = state.role;
   if (!role) return;
   if (notifyPeer && code) state.socket.emit("end-session", { code });
+  await abortTransfers();
   clearInterval(state.timers.stats);
   clearInterval(state.timers.session);
   state.peer?.close();
@@ -552,6 +700,7 @@ async function endSession({ notifyPeer = true, reason = "Session terminée." } =
       status: "completed"
     });
   }
+  earlySignals.length = 0;
   Object.assign(state, { peer: null, role: null, resumeToken: null, remoteCode: null, candidateQueue: [], channels: {}, incomingFile: null, sessionStartedAt: 0 });
   $("remoteVideo").srcObject = null;
   $("localVideo").srcObject = null;
@@ -633,6 +782,28 @@ function addMessage(text, mine = false) {
     $$('[data-panel="chat"] .unread').forEach((dot) => { dot.hidden = false; });
     notify(String(text).slice(0, 140), "info", "Nouveau message");
   }
+}
+
+function setSound(on) {
+  $("remoteVideo").muted = !on;
+  $("toggleSound").setAttribute("aria-pressed", String(on));
+  $("toggleSound").querySelector("use").setAttribute("href", on ? "#i-volume" : "#i-mute");
+}
+
+function closeMenus(except = null) {
+  for (const [menu, button] of [["keysMenu", "keysMenuButton"], ["screensMenu", "screensButton"]]) {
+    if (menu === except) continue;
+    $(menu).hidden = true;
+    $(button).setAttribute("aria-expanded", "false");
+  }
+}
+
+function toggleMenu(menu, button) {
+  const open = $(menu).hidden;
+  closeMenus(menu);
+  $(menu).hidden = !open;
+  $(button).setAttribute("aria-expanded", String(open));
+  if (open) $(menu).querySelector("button")?.focus();
 }
 
 function setZoom(level) {
@@ -794,6 +965,7 @@ function bindSocket(socket) {
     state.peerName = deviceName || "Ordinateur distant";
     setViewerPending(false);
     await createPeer(false);
+    await drainEarlySignals();
     enterSession("viewer");
   });
   socket.on("viewer-denied", ({ reason }) => {
@@ -811,6 +983,8 @@ function bindSocket(socket) {
       if (track.kind === "video") track.contentHint = (QUALITY[prefs.quality] || QUALITY.sharp).hint;
       peer.addTrack(track, state.stream);
     }
+    // Emplacement audio réservé : le son pourra être ajouté plus tard sans renégocier.
+    if (!state.stream.getAudioTracks().length) peer.addTransceiver("audio", { direction: "sendonly", streams: [state.stream] });
     await sendOffer(peer);
   });
   socket.on("peer-reconnecting", () => setSessionStatus("Reconnexion de l’autre ordinateur…"));
@@ -845,8 +1019,8 @@ function bindSocket(socket) {
     $("clipboardText").value = text;
     notify("Texte reçu dans le panneau Presse-papiers.", "success", "Presse-papiers");
   });
-  socket.on("file-offer", ({ id, name, size }) => {
-    state.pendingFileOffer = { id, name, size };
+  socket.on("file-offer", ({ id, name, size, direct }) => {
+    state.pendingFileOffer = { id, name, size, direct: Boolean(direct) };
     $("fileOfferText").textContent = `${name} · ${formatBytes(size)}`;
     $("fileDialog").showModal();
   });
@@ -856,6 +1030,12 @@ function bindSocket(socket) {
       $("fileStatus").textContent = "Le fichier a été refusé.";
       return;
     }
+    if (state.channels["file-transfer"]?.readyState === "open") {
+      $("fileStatus").textContent = "";
+      await streamFile(file, id);
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) { $("fileStatus").textContent = "Liaison directe indisponible : 25 Mo maximum."; return; }
     $("fileStatus").textContent = "Envoi en cours…";
     socket.emit("file-data", { code: sessionCode(), id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
     $("fileStatus").textContent = `${file.name} envoyé.`;
@@ -1060,11 +1240,17 @@ function bindUi() {
 
   // Session — aidant
   $("toggleControl").onclick = () => { state.inputPaused = !state.inputPaused; updateControlUi(); if (!state.inputPaused) $("remoteVideo").focus(); };
-  $("keysMenuButton").onclick = () => {
-    const open = $("keysMenu").hidden;
-    $("keysMenu").hidden = !open;
-    $("keysMenuButton").setAttribute("aria-expanded", String(open));
-    if (open) $("keysMenu").querySelector("button").focus();
+  $("keysMenuButton").onclick = () => toggleMenu("keysMenu", "keysMenuButton");
+  $("screensButton").onclick = () => toggleMenu("screensMenu", "screensButton");
+  $("toggleSound").onclick = () => setSound($("remoteVideo").muted);
+  $("hostChangeScreen").onclick = () => openSourcePicker().catch((error) => notify(error.message, "error"));
+  $("showReceivedFile").onclick = () => { if ($("showReceivedFile").dataset.path) bridge.showInFolder($("showReceivedFile").dataset.path); };
+  $("permAudio").checked = Boolean(prefs.shareAudio);
+  $("permAudio").onchange = async () => {
+    prefs.shareAudio = $("permAudio").checked;
+    savePrefs();
+    // Recapture immédiate de l'écran choisi pour ajouter ou retirer le son.
+    if (state.lastSource && state.stream) await selectSource(state.lastSource, state.sourceName).catch((error) => notify(error.message, "error"));
   };
   $$("[data-combo]").forEach((button) => {
     button.onclick = () => {
@@ -1074,12 +1260,7 @@ function bindUi() {
       $("remoteVideo").focus();
     };
   });
-  document.addEventListener("click", (event) => {
-    if (!$("keysMenu").hidden && !event.target.closest(".menu-wrap")) {
-      $("keysMenu").hidden = true;
-      $("keysMenuButton").setAttribute("aria-expanded", "false");
-    }
-  });
+  document.addEventListener("click", (event) => { if (!event.target.closest(".menu-wrap")) closeMenus(); });
   $("zoomFit").onclick = () => setZoom(0);
   $("zoomLabel").onclick = () => setZoom(1);
   $("zoomIn").onclick = () => setZoom(Math.min(2.5, (state.zoom || 1) + 0.25));
@@ -1109,9 +1290,11 @@ function bindUi() {
   $("sendFile").onclick = () => {
     const file = $("fileInput").files[0];
     if (!file) return notify("Choisissez d’abord un fichier.", "error");
-    if (file.size > MAX_FILE_SIZE) return notify("Le fichier dépasse 25 Mo.", "error");
+    const direct = state.channels["file-transfer"]?.readyState === "open";
+    if (file.size > (direct ? MAX_DIRECT_FILE_SIZE : MAX_FILE_SIZE)) return notify(`Le fichier dépasse ${direct ? "2 Go" : "25 Mo"}.`, "error");
     if (!state.permissions.files) return notify("Les fichiers ne sont pas autorisés dans cette session.", "error");
-    state.socket.emit("file-offer", { code: sessionCode(), id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size });
+    if (state.transferOut) return notify("Un envoi est déjà en cours.", "error");
+    state.socket.emit("file-offer", { code: sessionCode(), id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size, direct });
     $("fileStatus").textContent = "En attente de l’accord de l’autre personne…";
   };
   $("readClipboard").onclick = async () => { $("clipboardText").value = await bridge.clipboardRead(); };
@@ -1134,18 +1317,29 @@ function bindUi() {
   $("clearHistory").onclick = () => { if (confirm("Effacer tout l’historique de cet ordinateur ?")) { writeJson(KEYS.history, []); renderHistory(); } };
 
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !$("keysMenu").hidden) $("keysMenu").hidden = true;
+    if (event.key === "Escape") closeMenus();
   });
   bindRemoteInput();
 }
 
-function decideFile(accepted) {
+async function decideFile(accepted) {
   const offer = state.pendingFileOffer;
   if (!offer) return;
-  state.socket.emit("file-decision", { code: sessionCode(), id: offer.id, accepted: accepted && state.permissions.files });
-  $("fileStatus").textContent = accepted ? "Réception…" : "Fichier refusé.";
-  $("fileDialog").close();
   state.pendingFileOffer = null;
+  $("fileDialog").close();
+  accepted = accepted && state.permissions.files;
+  if (accepted && offer.direct) {
+    // Le fichier est écrit directement sur le disque : on choisit l'emplacement avant d'accepter.
+    const begin = await bridge.fileBegin({ name: offer.name, size: offer.size }).catch(() => ({ ok: false }));
+    if (!begin.ok) accepted = false;
+    else state.transferIn = { offerId: offer.id, transferId: begin.transferId, name: offer.name, size: offer.size, received: 0, startedAt: performance.now(), queue: Promise.resolve() };
+  }
+  if (accepted && !offer.direct && offer.size > MAX_FILE_SIZE) accepted = false;
+  state.socket.emit("file-decision", { code: sessionCode(), id: offer.id, accepted });
+  if (accepted) {
+    $("fileStatus").textContent = "Réception…";
+    if (state.sidePanel !== "files") openSidePanel("files");
+  } else $("fileStatus").textContent = "Fichier refusé.";
 }
 
 function setAvailability(available) {

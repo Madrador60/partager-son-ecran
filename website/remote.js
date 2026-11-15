@@ -10,7 +10,9 @@ const socket = signalUrl
   ? io(signalUrl, { transports: ["websocket", "polling"], timeout: 10000, reconnectionDelayMax: 10000 })
   : io({ autoConnect: false });
 const platform = detectPlatform();
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // via le serveur
+const MAX_DIRECT_FILE_SIZE = 2 * 1024 ** 3; // en direct entre les deux appareils
+const CHUNK_SIZE = 64 * 1024;
 const DEVICE_NAME = `Navigateur ${navigator.userAgentData?.brands?.find((brand) => !/Not.A.Brand|Chromium/i.test(brand.brand))?.brand || ""}`.trim();
 // Raccourcis que le PC de l'aidant intercepterait lui-même.
 const COMBOS = {
@@ -25,7 +27,7 @@ const COMBOS = {
 const state = {
   role: null, peer: null, code: null, stream: null, resumeToken: null,
   permissions: { control: false, clipboard: false, files: false },
-  candidates: [], channels: {}, pendingViewer: null, pendingFileOffer: null,
+  candidates: [], channels: {}, pendingViewer: null, pendingFileOffer: null, transferIn: null, transferOut: null,
   inputPaused: false, zoom: 0, side: null, startedAt: 0, timers: {}
 };
 
@@ -163,14 +165,31 @@ async function createPeer(isHost) {
   const peer = new RTCPeerConnection({ iceServers: await iceServers(), bundlePolicy: "max-bundle" });
   state.peer = peer;
   peer.onicecandidate = ({ candidate }) => { if (candidate) socket.emit("signal", { code: state.code, data: { type: "candidate", candidate } }); };
-  peer.ondatachannel = ({ channel }) => { state.channels[channel.label] = channel; };
+  const bindChannel = (channel) => {
+    state.channels[channel.label] = channel;
+    channel.binaryType = "arraybuffer";
+    channel.onmessage = ({ data }) => {
+      try {
+        if (channel.label === "file-transfer") receiveChunk(data);
+        else if (channel.label === "commands" && state.role === "viewer") {
+          const message = JSON.parse(data);
+          if (message.type === "screens") renderScreens(message);
+        }
+      } catch {}
+    };
+  };
+  peer.ondatachannel = ({ channel }) => bindChannel(channel);
   if (isHost) {
     for (const [label, options] of [["input-fast", { ordered: false, maxRetransmits: 0 }], ["commands", { ordered: true }], ["file-transfer", { ordered: true }]]) {
-      state.channels[label] = peer.createDataChannel(label, options);
+      bindChannel(peer.createDataChannel(label, options));
     }
   } else {
-    peer.ontrack = ({ streams }) => {
-      $("video").srcObject = streams[0];
+    // Un seul flux regroupe l'image et le son, quel que soit l'ordre d'arrivée.
+    const remoteStream = new MediaStream();
+    $("video").srcObject = remoteStream;
+    peer.ontrack = ({ track }) => {
+      remoteStream.addTrack(track);
+      if (track.kind === "audio") { track.onunmute = () => { $("toggleSound").hidden = false; }; return; }
       $("videoLoader").hidden = true;
       $("video").focus();
     };
@@ -194,8 +213,14 @@ async function createPeer(isHost) {
   return peer;
 }
 
+// Messages arrivés avant la création de la connexion : gardés puis rejoués.
+const earlySignals = [];
+
 async function handleSignal(data) {
-  if (!state.peer) return;
+  if (!state.peer) {
+    if (state.code && earlySignals.length < 200) earlySignals.push(data);
+    return;
+  }
   if (data.type === "offer") {
     await state.peer.setRemoteDescription(data.sdp);
     for (const candidate of state.candidates.splice(0)) await state.peer.addIceCandidate(candidate).catch(() => {});
@@ -249,16 +274,23 @@ function enterSession(role, peerName) {
   $("sessionDuration").textContent = "00:00:00";
   $("messages").replaceChildren();
   $("videoLoader").hidden = false;
-  if (role === "host") $("video").srcObject = state.stream;
+  $("screensWrap").hidden = true;
+  $("toggleSound").hidden = true;
+  setSound(true);
+  if (role === "host") { $("video").srcObject = state.stream; $("video").muted = true; }
   setZoom(0);
   updateTools();
 }
 
 function endSession(notifyPeer = true, reason = "Session terminée.") {
   if (notifyPeer && state.code) socket.emit("end-session", { code: state.code });
+  if (state.transferOut) state.transferOut.cancelled = true;
+  state.transferIn = null;
+  $("fileProgress").hidden = true;
   for (const timer of Object.values(state.timers)) clearInterval(timer);
   state.peer?.close();
   const wasHost = state.role === "host";
+  earlySignals.length = 0;
   Object.assign(state, { role: null, peer: null, code: null, resumeToken: null, candidates: [], channels: {}, startedAt: 0, side: null });
   $("video").srcObject = null;
   closeSide();
@@ -305,6 +337,92 @@ function addMessage(text, mine) {
   $("messages").append(bubble);
   $("messages").scrollTop = $("messages").scrollHeight;
   if (!mine && state.side !== "chat") { $$(".unread").forEach((dot) => { dot.hidden = false; }); toast(`Message : ${String(text).slice(0, 120)}`); }
+}
+
+function setSound(on) {
+  $("video").muted = !on;
+  $("toggleSound").setAttribute("aria-pressed", String(on));
+  $("toggleSound").querySelector("use").setAttribute("href", on ? "#i-volume" : "#i-mute");
+}
+
+function renderScreens({ screens, current }) {
+  $("screensWrap").hidden = !Array.isArray(screens) || screens.length < 2;
+  $("screensMenu").replaceChildren();
+  for (const screen of screens || []) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("role", "menuitem");
+    button.textContent = String(screen.label).slice(0, 80);
+    button.classList.toggle("current", screen.id === current);
+    button.onclick = () => {
+      state.channels.commands?.send(JSON.stringify({ type: "select-screen", id: screen.id }));
+      $("screensMenu").hidden = true;
+      video.focus();
+    };
+    $("screensMenu").append(button);
+  }
+}
+
+/* ---------- Fichiers ---------- */
+
+function showProgress(name, done, total, startedAt, verb) {
+  $("fileProgress").hidden = false;
+  $("fileProgressName").textContent = name;
+  const percent = total ? Math.floor(done / total * 100) : 0;
+  $("fileProgressPercent").textContent = `${percent} %`;
+  $("fileProgressBar").value = percent;
+  const speed = done / Math.max(0.5, (performance.now() - startedAt) / 1000);
+  $("fileProgressDetail").textContent = `${verb} ${formatBytes(done)} sur ${formatBytes(total)} · ${formatBytes(speed)}/s`;
+}
+
+function finishTransfer(message) {
+  $("fileProgress").hidden = true;
+  $("fileStatus").textContent = message;
+}
+
+async function streamFile(file, id) {
+  const channel = state.channels["file-transfer"];
+  const transfer = { cancelled: false };
+  state.transferOut = transfer;
+  const startedAt = performance.now();
+  channel.bufferedAmountLowThreshold = 1024 * 1024;
+  channel.send(JSON.stringify({ type: "start", id, name: file.name, size: file.size }));
+  for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+    if (transfer.cancelled || channel.readyState !== "open") { state.transferOut = null; return finishTransfer("Envoi interrompu."); }
+    if (channel.bufferedAmount > 8 * 1024 * 1024) await new Promise((resolve) => { channel.onbufferedamountlow = resolve; });
+    channel.send(await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer());
+    if (offset % (CHUNK_SIZE * 16) === 0) showProgress(file.name, offset, file.size, startedAt, "Envoyé");
+  }
+  channel.send(JSON.stringify({ type: "end", id }));
+  state.transferOut = null;
+  finishTransfer(`${file.name} envoyé.`);
+}
+
+function receiveChunk(data) {
+  const transfer = state.transferIn;
+  if (typeof data === "string") {
+    const message = JSON.parse(data);
+    if (!transfer || message.id !== transfer.id) return;
+    if (message.type === "start") transfer.startedAt = performance.now();
+    if (message.type === "end") {
+      state.transferIn = null;
+      if (transfer.received !== transfer.size) return finishTransfer("Le fichier reçu est incomplet.");
+      const url = URL.createObjectURL(new Blob(transfer.chunks));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = transfer.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      finishTransfer(`${transfer.name} téléchargé.`);
+      toast(`Fichier reçu : ${transfer.name}`);
+    }
+    return;
+  }
+  if (!transfer) return;
+  transfer.chunks.push(data);
+  transfer.received += data.byteLength;
+  if (transfer.received > transfer.size) { state.transferIn = null; return finishTransfer("Fichier refusé : taille incorrecte."); }
+  if (transfer.received === transfer.size || transfer.received % (CHUNK_SIZE * 16) === 0) showProgress(transfer.name, transfer.received, transfer.size, transfer.startedAt, "Reçu");
 }
 
 function setZoom(level) {
@@ -403,6 +521,7 @@ socket.on("viewer-approved", async ({ code, permissions, resumeToken, deviceName
   setPending(false);
   enterSession("viewer", deviceName || "Ordinateur distant");
   await createPeer(false);
+  for (const data of earlySignals.splice(0)) await handleSignal(data).catch(() => {});
 });
 socket.on("viewer-denied", ({ reason }) => { if (state.role === "viewer") { state.code = null; state.role = null; showError(reason); } });
 socket.on("host-unavailable", ({ reason }) => toast(reason));
@@ -419,14 +538,16 @@ socket.on("permissions-state", (permissions) => { state.permissions = permission
 socket.on("signal", ({ data }) => handleSignal(data).catch(() => toast("La négociation de la connexion a échoué.")));
 socket.on("chat-message", ({ text }) => addMessage(text, false));
 socket.on("clipboard-share", ({ text }) => { $("clipboard").value = text; toast("Texte reçu dans le panneau Presse-papiers."); });
-socket.on("file-offer", ({ id, name, size }) => {
-  state.pendingFileOffer = { id, name };
+socket.on("file-offer", ({ id, name, size, direct }) => {
+  state.pendingFileOffer = { id, name, size, direct: Boolean(direct) };
   $("fileOfferText").textContent = `${name} · ${formatBytes(size)}`;
   $("fileDialog").showModal();
 });
 socket.on("file-decision", async ({ id, accepted }) => {
   const file = $("file").files[0];
   if (!accepted || !file || id !== `${file.name}:${file.size}`) { $("fileStatus").textContent = "Le fichier a été refusé."; return; }
+  if (state.channels["file-transfer"]?.readyState === "open") { $("fileStatus").textContent = ""; await streamFile(file, id); return; }
+  if (file.size > MAX_FILE_SIZE) { $("fileStatus").textContent = "Liaison directe indisponible : 25 Mo maximum."; return; }
   $("fileStatus").textContent = "Envoi…";
   socket.emit("file-data", { code: state.code, id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
   $("fileStatus").textContent = `${file.name} envoyé.`;
@@ -473,11 +594,15 @@ $("accept").onclick = () => {
 };
 
 $("toggleControl").onclick = () => { state.inputPaused = !state.inputPaused; updateTools(); if (!state.inputPaused) video.focus(); };
-$("keysButton").onclick = () => {
-  const open = $("keysMenu").hidden;
-  $("keysMenu").hidden = !open;
-  $("keysButton").setAttribute("aria-expanded", String(open));
-};
+function toggleMenu(menu, button) {
+  const open = $(menu).hidden;
+  for (const [other, otherButton] of [["keysMenu", "keysButton"], ["screensMenu", "screensButton"]]) { $(other).hidden = true; $(otherButton).setAttribute("aria-expanded", "false"); }
+  $(menu).hidden = !open;
+  $(button).setAttribute("aria-expanded", String(open));
+}
+$("keysButton").onclick = () => toggleMenu("keysMenu", "keysButton");
+$("screensButton").onclick = () => toggleMenu("screensMenu", "screensButton");
+$("toggleSound").onclick = () => setSound(video.muted);
 $$("[data-combo]").forEach((button) => {
   button.onclick = () => {
     sendPayload({ type: "keydown", ctrl: false, shift: false, alt: false, meta: false, ...COMBOS[button.dataset.combo] });
@@ -486,7 +611,7 @@ $$("[data-combo]").forEach((button) => {
     video.focus();
   };
 });
-document.addEventListener("click", (event) => { if (!event.target.closest(".menu-wrap")) $("keysMenu").hidden = true; });
+document.addEventListener("click", (event) => { if (!event.target.closest(".menu-wrap")) { $("keysMenu").hidden = true; $("screensMenu").hidden = true; } });
 $("zoomFit").onclick = () => setZoom(0);
 $("zoomLabel").onclick = () => setZoom(1);
 $("zoomIn").onclick = () => setZoom(Math.min(2.5, (state.zoom || 1) + 0.25));
@@ -507,13 +632,18 @@ $("file").onchange = () => { const file = $("file").files[0]; $("fileLabel").tex
 $("sendFile").onclick = () => {
   const file = $("file").files[0];
   if (!file) return toast("Choisissez d’abord un fichier.");
-  if (file.size > MAX_FILE_SIZE) return toast("Le fichier dépasse 25 Mo.");
-  socket.emit("file-offer", { code: state.code, id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size });
+  const direct = state.channels["file-transfer"]?.readyState === "open";
+  if (file.size > (direct ? MAX_DIRECT_FILE_SIZE : MAX_FILE_SIZE)) return toast(`Le fichier dépasse ${direct ? "2 Go" : "25 Mo"}.`);
+  if (state.transferOut) return toast("Un envoi est déjà en cours.");
+  socket.emit("file-offer", { code: state.code, id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size, direct });
   $("fileStatus").textContent = "En attente de l’accord de l’autre personne…";
 };
 const decideFile = (accepted) => {
-  if (!state.pendingFileOffer) return;
-  socket.emit("file-decision", { code: state.code, id: state.pendingFileOffer.id, accepted });
+  const offer = state.pendingFileOffer;
+  if (!offer) return;
+  if (accepted && !offer.direct && offer.size > MAX_FILE_SIZE) accepted = false;
+  if (accepted && offer.direct) state.transferIn = { id: offer.id, name: offer.name, size: offer.size, received: 0, chunks: [], startedAt: performance.now() };
+  socket.emit("file-decision", { code: state.code, id: offer.id, accepted });
   $("fileStatus").textContent = accepted ? "Réception…" : "Fichier refusé.";
   state.pendingFileOffer = null;
   $("fileDialog").close();

@@ -15,6 +15,8 @@ const { createIceServers } = require("../src/server/turn/ice-config");
 const SESSION_TTL = 10 * 60_000;
 const RECONNECT_GRACE_MS = Math.max(10_000, Number(process.env.RECONNECT_GRACE_MS || 60_000));
 const MAX_FILE_BYTES = Math.max(1, Number(process.env.MAX_FILE_MB || 25)) * 1024 * 1024;
+// Les gros fichiers passent en direct (DataChannel) : le serveur ne fait qu'autoriser l'offre.
+const MAX_TRANSFER_BYTES = Math.max(MAX_FILE_BYTES, Number(process.env.MAX_TRANSFER_MB || 2048) * 1024 * 1024);
 const configuredOrigins = process.env.PUBLIC_ORIGIN?.split(",").map((value) => value.trim()).filter(Boolean) || [];
 if (process.env.NODE_ENV === "production" && configuredOrigins.length === 0) {
   throw new Error("PUBLIC_ORIGIN est obligatoire en production");
@@ -263,7 +265,7 @@ io.on("connection", (socket) => {
       const peer = peerOf(socket, entry[1]);
       if (!peer) return;
       if (event === "chat-message") io.to(peer).emit(event, { text: clean(payload.text) });
-      else if (event === "file-offer" && Number(payload.size) > 0 && Number(payload.size) <= MAX_FILE_BYTES) io.to(peer).emit(event, { id: clean(payload.id, 150), name: clean(payload.name, 200), type: clean(payload.type, 100), size: Number(payload.size) });
+      else if (event === "file-offer" && Number(payload.size) > 0 && Number(payload.size) <= MAX_TRANSFER_BYTES) io.to(peer).emit(event, { id: clean(payload.id, 150), name: clean(payload.name, 200), type: clean(payload.type, 100), size: Number(payload.size), direct: Boolean(payload.direct) });
       else if (event === "file-decision") io.to(peer).emit(event, { id: clean(payload.id, 150), accepted: Boolean(payload.accepted) });
     });
   }
