@@ -11,6 +11,8 @@ const { z } = require("zod");
 const { ControlConfig, RemoteInput, SaveFile } = require("./src/shared/validation");
 const { createTrustedIpc } = require("./src/main/ipc/trusted-ipc");
 const { createIceServers } = require("./src/server/turn/ice-config");
+const { startEmbeddedServer, stopEmbeddedServer } = require("./src/main/embedded-server");
+const { planKeydown, buttonName } = require("./src/main/remote-input");
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let window;
@@ -22,6 +24,21 @@ let sessionActive = false;
 let rendererReady = false;
 let lastUpdaterStatus = { status: "idle" };
 let remoteControl = { enabled: false, bounds: null };
+let embeddedServer = null;
+
+// Serveur public partagé par tous les utilisateurs : indispensable pour relier
+// deux PC sur des réseaux Internet différents. Injecté au build (package.json →
+// "madrador.signalUrl") ou via MADRADOR_SIGNAL_URL ; sinon serveur local intégré.
+function defaultSignalUrl() {
+  const candidates = [process.env.MADRADOR_SIGNAL_URL, require("./package.json").madrador?.signalUrl];
+  for (const value of candidates) {
+    try {
+      const url = new URL(String(value || ""));
+      if (["http:", "https:"].includes(url.protocol)) return url.origin;
+    } catch {}
+  }
+  return "";
+}
 
 function isTrusted(event) {
   const url = event.senderFrame?.url || "";
@@ -184,12 +201,19 @@ async function verifyOptionalSha256(info) {
 }
 
 app.setAppUserModelId("com.madrador.remote");
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  embeddedServer = await startEmbeddedServer();
   createWindow();
   createTray();
   configureUpdater();
+}).catch((error) => {
+  console.error("Embedded server startup:", error.message);
+  app.quit();
 });
-app.on("before-quit", () => { app.isQuiting = true; });
+app.on("before-quit", () => {
+  app.isQuiting = true;
+  stopEmbeddedServer(embeddedServer).catch(() => {});
+});
 app.on("window-all-closed", () => { if (process.platform === "darwin") app.quit(); });
 
 trustedIpc.handle("system-info", async () => {
@@ -269,30 +293,80 @@ trustedIpc.handle("list-sources", async () => {
   }));
 });
 
-trustedIpc.handle("set-control-enabled", (_event, value = {}) => {
+let nut = null;
+const pressedButtons = new Set();
+let inputQueue = Promise.resolve();
+let pendingMove = null;
+
+function loadNut() {
+  if (!nut) {
+    nut = require("@nut-tree-fork/nut-js");
+    nut.mouse.config.autoDelayMs = 0;
+    nut.keyboard.config.autoDelayMs = 0;
+    // nut-js fixe 300 ms de délai natif par touche au démarrage : on le supprime.
+    try { if (nut.providerRegistry.hasKeyboard()) nut.providerRegistry.getKeyboard().setKeyboardDelay(0); } catch {}
+  }
+  return nut;
+}
+
+async function releaseAllButtons() {
+  if (!nut || !pressedButtons.size) return;
+  for (const name of pressedButtons) await nut.mouse.releaseButton(nut.Button[name]).catch(() => {});
+  pressedButtons.clear();
+}
+
+async function executeRemoteInput(payload) {
+  const { mouse, keyboard, Button, Key, Point } = loadNut();
+  const bounds = remoteControl.bounds || screen.getPrimaryDisplay().bounds;
+  const point = () => new Point(
+    bounds.x + Math.round(Math.max(0, Math.min(1, Number(payload.x) || 0)) * (bounds.width - 1)),
+    bounds.y + Math.round(Math.max(0, Math.min(1, Number(payload.y) || 0)) * (bounds.height - 1))
+  );
+  if (payload.type === "mousemove") await mouse.setPosition(point());
+  else if (payload.type === "mousedown" || payload.type === "mouseup") {
+    const name = buttonName(payload.button);
+    await mouse.setPosition(point());
+    if (payload.type === "mousedown") { await mouse.pressButton(Button[name]); pressedButtons.add(name); }
+    else { await mouse.releaseButton(Button[name]); pressedButtons.delete(name); }
+  } else if (payload.type === "wheel") {
+    const amount = Math.max(1, Math.min(12, Math.round(Math.abs(payload.deltaY) / 40)));
+    if (payload.deltaY < 0) await mouse.scrollUp(amount); else await mouse.scrollDown(amount);
+  } else if (payload.type === "keydown") {
+    const plan = planKeydown(payload);
+    if (plan?.kind === "text") await keyboard.type(plan.text);
+    else if (plan?.kind === "combo") {
+      const keys = plan.keys.map((name) => Key[name]).filter((value) => value !== undefined);
+      if (keys.length !== plan.keys.length) return;
+      try { await keyboard.pressKey(...keys); } finally { await keyboard.releaseKey(...keys.reverse()); }
+    }
+  }
+}
+
+trustedIpc.handle("set-control-enabled", async (_event, value = {}) => {
   value = ControlConfig.parse(value);
   remoteControl = { enabled: Boolean(value.enabled), bounds: value.bounds || null };
+  if (!remoteControl.enabled) await releaseAllButtons();
   return { ok: true };
 });
 
 trustedIpc.handle("remote-input", async (_event, payload = {}) => {
   payload = RemoteInput.parse(payload);
   if (!remoteControl.enabled) return { ok: false, error: "Contrôle non autorisé" };
-  const { mouse, keyboard, Button, Key, Point } = require("@nut-tree-fork/nut-js");
-  const bounds = remoteControl.bounds || screen.getPrimaryDisplay().bounds;
-  const x = bounds.x + Math.round(Math.max(0, Math.min(1, Number(payload.x) || 0)) * (bounds.width - 1));
-  const y = bounds.y + Math.round(Math.max(0, Math.min(1, Number(payload.y) || 0)) * (bounds.height - 1));
-  if (payload.type === "mousemove") await mouse.setPosition(new Point(x, y));
-  else if (payload.type === "mousedown") await mouse.pressButton(payload.button === 2 ? Button.RIGHT : Button.LEFT);
-  else if (payload.type === "mouseup") await mouse.releaseButton(payload.button === 2 ? Button.RIGHT : Button.LEFT);
-  else if (payload.type === "wheel") {
-    const amount = Math.max(1, Math.min(12, Math.round(Math.abs(payload.deltaY) / 80)));
-    if (payload.deltaY < 0) await mouse.scrollUp(amount); else await mouse.scrollDown(amount);
-  } else if (payload.type === "keydown") {
-    const keys = { Enter: Key.ENTER, Escape: Key.ESCAPE, Backspace: Key.BACKSPACE, Tab: Key.TAB, ArrowUp: Key.UP, ArrowDown: Key.DOWN, ArrowLeft: Key.LEFT, ArrowRight: Key.RIGHT, Delete: Key.DELETE, " ": Key.SPACE };
-    if (keys[payload.key]) await keyboard.type(keys[payload.key]);
-    else if (typeof payload.key === "string" && payload.key.length === 1) await keyboard.type(payload.key);
+  // Les mouvements en attente sont fusionnés pour éviter tout retard cumulé.
+  if (payload.type === "mousemove") {
+    const alreadyQueued = Boolean(pendingMove);
+    pendingMove = payload;
+    if (alreadyQueued) return { ok: true };
   }
+  // Exécution séquentielle : l'ordre clic/relâchement/frappe est garanti.
+  const run = inputQueue.then(() => {
+    if (payload.type !== "mousemove") return executeRemoteInput(payload);
+    const move = pendingMove;
+    pendingMove = null;
+    return move ? executeRemoteInput(move) : undefined;
+  });
+  inputQueue = run.catch(() => {});
+  await run;
   return { ok: true };
 });
 
@@ -310,5 +384,16 @@ trustedIpc.handle("save-file", async (_event, file = {}) => {
   await fs.writeFile(result.filePath, data);
   return { ok: true, path: result.filePath };
 });
-trustedIpc.handle("get-signal-url", () => process.env.MADRADOR_SIGNAL_URL || "");
-trustedIpc.handle("get-ice-servers", () => createIceServers());
+trustedIpc.handle("get-signal-url", () => defaultSignalUrl() || embeddedServer?.url || "");
+trustedIpc.handle("get-embedded-signal-url", () => embeddedServer?.url || "");
+trustedIpc.handle("get-ice-servers", async (_event, serverUrl) => {
+  // Les identifiants TURN sont générés par le serveur partagé : le secret ne quitte jamais le serveur.
+  try {
+    const url = new URL(z.string().max(500).parse(serverUrl || ""));
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error("SIGNAL_PROTOCOL");
+    const response = await fetch(new URL("/api/ice", url.origin), { signal: AbortSignal.timeout(5000) });
+    const body = response.ok ? await response.json() : null;
+    if (Array.isArray(body?.iceServers) && body.iceServers.length) return body.iceServers.slice(0, 10);
+  } catch {}
+  return createIceServers();
+});

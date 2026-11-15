@@ -1,6 +1,6 @@
 {
   "name": "madrador-remote",
-  "version": "6.2.0",
+  "version": "6.3.0",
   "description": "Madrador Remote V6 - assistance distante visible, consentie et modulaire",
   "main": "main.js",
   "private": true,
@@ -9,7 +9,7 @@
     "server": "node server/index.js",
     "build": "electron-builder --win nsis",
     "dist": "npm run build",
-    "check": "node --check main.js && node --check preload.js && node --check server/index.js && node --check src/main/ipc/trusted-ipc.js && node --check src/server/sessions/create-session-store.js && node --check src/server/sessions/memory-session-store.js && node --check src/server/sessions/redis-session-store.js && node --check src/server/turn/ice-config.js && node --check src/shared/validation.js && node --check src/services/github-releases.js && node --check public/app.js && node --check website/site.js && node --check website/remote.js",
+    "check": "node --check main.js && node --check preload.js && node --check server/index.js && node --check src/main/ipc/trusted-ipc.js && node --check src/main/embedded-server.js && node --check src/main/remote-input.js && node --check src/server/sessions/create-session-store.js && node --check src/server/sessions/memory-session-store.js && node --check src/server/sessions/redis-session-store.js && node --check src/server/turn/ice-config.js && node --check src/shared/validation.js && node --check src/services/github-releases.js && node --check public/app.js && node --check website/site.js && node --check website/remote.js",
     "update-safe": "npm audit fix",
     "verify": "npm run check && npm test && npm run test:security",
     "test:security": "node scripts/security-check.js",
@@ -22,7 +22,7 @@
     "@nut-tree-fork/nut-js": "^4.2.2",
     "dotenv": "^16.6.1",
     "electron-updater": "^6.8.9",
-    "express": "^4.21.2",
+    "express": "^4.22.3",
     "express-rate-limit": "^8.6.0",
     "helmet": "^8.3.0",
     "redis": "^5.12.1",
@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.0",
-    "electron": "^37.2.0",
+    "electron": "^42.11.18",
     "electron-builder": "^26.0.12"
   },
   "build": {
@@ -42,9 +42,13 @@
     "files": [
       "main.js",
       "preload.js",
+      "server/**/*",
       "src/main/**/*",
+      "src/server/**/*",
+      "src/services/**/*",
       "src/shared/**/*",
       "public/**/*",
+      "website/**/*",
       "assets/**/*",
       "package.json"
     ],
@@ -67,5 +71,8 @@
     },
     "artifactName": "Madrador-Remote-Setup-${version}.${ext}"
   },
-  "author": "Madrador60"
+  "author": "Madrador60",
+  "madrador": {
+    "signalUrl": ""
+  }
 }

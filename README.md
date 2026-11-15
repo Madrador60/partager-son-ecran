@@ -8,6 +8,22 @@
 
 Application Windows d’assistance à distance visible et consentie. Madrador Remote permet de partager un écran, contrôler un poste autorisé, discuter et échanger des fichiers ou du texte.
 
+Les sessions sont **illimitées par défaut** : rien ne coupe la connexion tant que
+l’un des deux ne clique pas sur « Arrêter ».
+
+### Aider un ami sur Internet
+
+1. Héberger une fois le serveur public gratuit (Render, fichier `render.yaml`) et
+   ajouter un relais TURN : voir [DEPLOYMENT.md](DEPLOYMENT.md), environ 10 minutes.
+2. Renseigner son adresse dans Paramètres › Connexion, ou dans la variable GitHub
+   `MADRADOR_SIGNAL_URL` pour qu’elle soit intégrée aux installeurs.
+3. L’ami installe Madrador Remote, choisit son écran puis clique sur « Générer un
+   nouveau code ».
+4. Vous saisissez son code, il accepte, et vous voyez et contrôlez son PC.
+
+Sans serveur public, l’application utilise son serveur intégré (`127.0.0.1`) et un
+bandeau « Mode local » rappelle que seul ce PC peut s’y connecter.
+
 > **Projet en développement.** Madrador Remote est actuellement un MVP Windows. Il ne remplace pas encore un service commercial comme AnyDesk, ne garantit aucune latence nulle et ne doit jamais être utilisé sans consentement.
 
 ## Télécharger
@@ -166,6 +182,11 @@ Variables principales :
 
 Pour une utilisation entre deux réseaux différents, configurez impérativement HTTPS et un serveur TURN. Un serveur STUN seul ne garantit pas la connexion.
 
+Sans `MADRADOR_SIGNAL_URL`, l’application utilise automatiquement son serveur intégré
+sur `127.0.0.1:3000`. Si une autre instance Madrador utilise déjà ce port sur le même
+ordinateur, elle rejoint ce serveur existant. Si le port appartient à un autre
+programme, l’application choisit automatiquement un port libre.
+
 ## Tests et création de l’installeur
 
 ```powershell
@@ -184,12 +205,12 @@ Deux méthodes sont disponibles :
 1. mettre à jour `package.json` et `package-lock.json`, puis pousser un tag correspondant ;
 
    ```powershell
-   npm version 6.2.0
+   npm version 6.3.0
    git push
-   git push origin v6.2.0
+   git push origin v6.3.0
    ```
 
-2. lancer manuellement le workflow **Release** dans GitHub Actions et saisir `6.2.0`. Le workflow applique cette version uniquement au build publié.
+2. lancer manuellement le workflow **Release** dans GitHub Actions et saisir `6.3.0`. Le workflow applique cette version uniquement au build publié.
 
 Le workflow :
 

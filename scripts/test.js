@@ -8,6 +8,7 @@ const { normalize } = require("../src/services/github-releases");
 const { MemorySessionStore } = require("../src/server/sessions/memory-session-store");
 const { createIceServers } = require("../src/server/turn/ice-config");
 const { createTrustedIpc } = require("../src/main/ipc/trusted-ipc");
+const { isMadradorServer } = require("../src/main/embedded-server");
 
 const root = path.join(__dirname, "..");
 
@@ -75,6 +76,28 @@ async function run() {
   assert.equal(turn.length, 2);
   assert.match(turn[1].username, /^\d+:madrador$/);
   assert.notEqual(turn[1].credential, "server-side-secret");
+  const staticTurn = createIceServers({ MADRADOR_TURN_MODE: "static", MADRADOR_TURN_URL: "turn:relay.example.test:443", MADRADOR_TURN_USERNAME: "user", MADRADOR_TURN_CREDENTIAL: "pass" });
+  assert.deepEqual([staticTurn[1].username, staticTurn[1].credential], ["user", "pass"]);
+
+  const { planKeydown, buttonName } = require("../src/main/remote-input");
+  assert.deepEqual(planKeydown({ key: "é" }), { kind: "text", text: "é" });
+  assert.deepEqual(planKeydown({ key: "A", shift: true }), { kind: "text", text: "A" });
+  assert.deepEqual(planKeydown({ key: "@", ctrl: true, alt: true }), { kind: "text", text: "@" });
+  assert.deepEqual(planKeydown({ key: "Enter" }), { kind: "combo", keys: ["Enter"] });
+  assert.deepEqual(planKeydown({ key: "ArrowLeft", shift: true }), { kind: "combo", keys: ["LeftShift", "Left"] });
+  assert.deepEqual(planKeydown({ key: "c", code: "KeyC", ctrl: true }), { kind: "combo", keys: ["LeftControl", "C"] });
+  assert.deepEqual(planKeydown({ key: "T", code: "KeyT", ctrl: true, shift: true }), { kind: "combo", keys: ["LeftControl", "LeftShift", "T"] });
+  assert.deepEqual(planKeydown({ key: "F5" }), { kind: "combo", keys: ["F5"] });
+  assert.deepEqual(planKeydown({ key: "Meta", meta: true }), { kind: "combo", keys: ["LeftSuper"] });
+  assert.deepEqual(planKeydown({ key: "&", code: "Digit1", ctrl: true }), { kind: "combo", keys: ["LeftControl", "Num1"] });
+  assert.equal(planKeydown({ key: "Shift", shift: true }), null);
+  assert.equal(planKeydown({ key: "Dead" }), null);
+  assert.deepEqual([0, 1, 2].map(buttonName), ["LEFT", "MIDDLE", "RIGHT"]);
+  const nutKeys = require("@nut-tree-fork/shared").Key;
+  for (const key of ["Enter", "Escape", "Backspace", "Tab", "Delete", "Home", "End", "PageUp", "PageDown", "Up", "Down", "Left", "Right", "Space", "LeftControl", "LeftShift", "LeftAlt", "LeftSuper", "F5", "Num1", "C", "Print", "Menu", "Grave"]) {
+    assert.notEqual(nutKeys[key], undefined, `Touche nut-js inconnue : ${key}`);
+  }
+
   let trustedListener;
   const trustedIpc = createTrustedIpc({ handle: (_channel, listener) => { trustedListener = listener; } }, (event) => event.ok);
   trustedIpc.handle("test", () => "ok");
@@ -90,6 +113,7 @@ async function run() {
   const response = await fetch(`${url}/api/health`);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).ok, true);
+  assert.equal(await isMadradorServer(url), true);
   const siteResponse = await fetch(url);
   assert.equal(siteResponse.status, 200);
   assert.match(await siteResponse.text(), /Madrador Remote — Assistance à distance/);
@@ -100,6 +124,9 @@ async function run() {
   assert.equal((await fetch(`${url}/runtime-config.js`)).status, 200);
   const corsResponse = await fetch(`${url}/api/ice`, { headers: { Origin: "http://localhost:3000" } });
   assert.equal(corsResponse.headers.get("access-control-allow-origin"), "http://localhost:3000");
+  const packagedFiles = require("../package.json").build.files;
+  assert.ok(packagedFiles.includes("server/**/*"));
+  assert.ok(packagedFiles.includes("src/server/**/*"));
 
   const host = connect(url, { transports: ["websocket"], forceNew: true });
   const viewer = connect(url, { transports: ["websocket"], forceNew: true });

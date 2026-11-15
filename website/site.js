@@ -36,6 +36,10 @@ fetch(releaseEndpoint)
     }
   })
   .catch(() => {
+    // Repli : la page « dernière version » de GitHub reste toujours accessible.
+    const latest = "https://github.com/Madrador60/partager-son-ecran/releases/latest";
+    document.getElementById("downloadButton").href = latest;
+    document.getElementById("navDownload").href = latest;
     info.textContent = "Le téléchargement automatique est momentanément indisponible.";
     fallback.hidden = false;
   });

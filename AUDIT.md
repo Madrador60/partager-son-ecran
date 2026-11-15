@@ -19,6 +19,7 @@ Audit mis à jour sur la branche `codex/professional-hardening`. Les numéros de
 | Reconnexion | Une rupture supprimait immédiatement la session. | Période de grâce, rattachement Socket.IO par jeton, conservation des permissions et `restartIce()`. Reprise de transfert reste ouverte. | Partiel |
 | TURN | STUN seul ne traverse pas tous les NAT et le secret risquait d’être exposé. | `/api/ice` génère des identifiants HMAC temporaires pour les URL UDP/TCP/TLS. Le déploiement Coturn réel reste externe. | Partiel |
 | Disponibilité | Le bouton ne changeait que l’interface. | Le serveur refuse création et demandes quand l’hôte est indisponible; tests d’intégration ajoutés. | Corrigé |
+| Démarrage serveur | L’utilisateur devait lancer manuellement `npm run server`. | Electron démarre et arrête un serveur intégré, réutilise une instance locale existante et sélectionne un port libre en cas de conflit. | Corrigé |
 | Transfert | Pas de reprise, SHA-256, progression fiable ni écriture progressive. | Ne pas dépasser la limite configurée ; remplacement complet prévu en V6.2. | Ouvert |
 
 ## Moyen
