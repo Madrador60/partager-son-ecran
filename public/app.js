@@ -873,6 +873,11 @@ function bindSocket(socket) {
 
 /* ---------- Mises à jour ---------- */
 
+// Les notes GitHub sont en HTML : on n'en garde que le texte (DOMParser n'exécute rien).
+function plainText(html) {
+  return new DOMParser().parseFromString(String(html || ""), "text/html").body.textContent || "";
+}
+
 function updateUpdater(data) {
   state.update = data;
   const labels = {
@@ -893,7 +898,7 @@ function updateUpdater(data) {
   $("updateProgress").hidden = data.status !== "downloading";
   $("updateProgress").value = data.percent || 0;
   const notes = typeof data.notes === "string" ? data.notes : Array.isArray(data.notes) ? data.notes.map((note) => note.note || "").join("\n") : "";
-  $("releaseNotes").textContent = notes.replace(/<[^>]+>/g, "").slice(0, 1500);
+  $("releaseNotes").textContent = plainText(notes).slice(0, 1500);
   const action = data.status === "available" ? "download" : data.status === "downloaded" ? "install" : "check";
   $("updateButton").dataset.action = action;
   $("updateButton").textContent = { download: "Télécharger", install: "Installer", check: "Rechercher" }[action];
@@ -903,7 +908,7 @@ function updateUpdater(data) {
     if (!$("updateDialog").open && !state.role) $("updateDialog").showModal();
     $("updateDialogTitle").textContent = data.status === "downloaded" ? "Mise à jour prête" : data.status === "downloading" ? "Téléchargement…" : "Nouvelle version disponible";
     $("updateDialogDescription").textContent = data.status === "downloading" ? "Vous pouvez continuer à utiliser l’application." : `Madrador Remote ${data.version}`;
-    $("updateDialogNotes").textContent = notes.replace(/<[^>]+>/g, "").slice(0, 1500);
+    $("updateDialogNotes").textContent = plainText(notes).slice(0, 1500);
     const downloading = data.status === "downloading";
     $("downloadMetrics").hidden = !downloading;
     $("updateDialogProgress").hidden = !downloading;
