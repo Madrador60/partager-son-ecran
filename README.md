@@ -205,12 +205,12 @@ Deux méthodes sont disponibles :
 1. mettre à jour `package.json` et `package-lock.json`, puis pousser un tag correspondant ;
 
    ```powershell
-   npm version 6.2.0
+   npm version 6.3.0
    git push
-   git push origin v6.2.0
+   git push origin v6.3.0
    ```
 
-2. lancer manuellement le workflow **Release** dans GitHub Actions et saisir `6.2.0`. Le workflow applique cette version uniquement au build publié.
+2. lancer manuellement le workflow **Release** dans GitHub Actions et saisir `6.3.0`. Le workflow applique cette version uniquement au build publié.
 
 Le workflow :
 
