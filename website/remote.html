@@ -1,85 +1,204 @@
 <!doctype html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
-  <title>Madrador Remote — Partager ou se connecter</title><link rel="stylesheet" href="./remote.css"><link rel="stylesheet" href="./remote-state.css"><link rel="stylesheet" href="./share.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: wss: ws:; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self'; script-src 'self'">
+  <title>Madrador Remote — Version web</title>
+  <link rel="icon" href="./logo.png">
+  <link rel="stylesheet" href="./remote.css">
 </head>
 <body>
-  <div class="ambient a"></div><div class="ambient b"></div>
-  <header class="remote-nav"><a href="./" class="brand"><span><img src="./logo.png" alt=""></span><b>Madrador <em>Remote</em></b></a><div class="server-state"><i id="serverDot"></i><b id="status">Connexion au serveur…</b></div><button id="leave" disabled>Quitter la session</button></header>
-  <main class="remote-shell">
-    <section id="modePanel" class="mode-panel">
-      <div class="mode-heading"><span class="eyebrow">MADRADOR REMOTE WEB</span><h1>Que souhaitez-vous faire ?</h1><p>Partagez votre écran ou rejoignez un appareil avec la même connexion WebRTC sécurisée.</p></div>
-      <div class="mode-grid">
-        <article><span class="mode-icon">🖥️</span><h2>Partager mon PC</h2><p>Générez un code et partagez votre écran avec une autre personne.</p><button id="openHost">Partager maintenant <b>→</b></button></article>
-        <article><span class="mode-icon violet">💻</span><h2>Se connecter à un PC</h2><p>Entrez un code pour accéder à un ordinateur distant.</p><button id="openViewer">Se connecter <b>→</b></button></article>
-      </div>
-      <div id="capabilityNotice" class="capability-notice"></div>
-    </section>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-mouse" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-clipboard" viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h4"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 18v-6M9 15l3-3 3 3"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 3H3v5M21 8V3h-5M16 21h5v-5M3 16v5h5"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 9h8v6H8z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+  </svg>
 
-    <section id="hostPanel" class="host-panel" hidden>
-      <button class="back-mode" data-back>← Choisir un autre mode</button>
-      <div class="host-grid">
-        <article class="host-main">
-          <span class="eyebrow">PARTAGER DEPUIS LE NAVIGATEUR</span><h1>Partager mon écran</h1><p>Votre navigateur vous laissera choisir un écran, une fenêtre ou un onglet.</p>
-          <button id="selectDisplay" class="host-primary">🖥️ Choisir ce que je partage</button>
-          <video id="hostPreview" autoplay muted playsinline></video>
-          <div id="hostCodeArea" hidden><span>Votre code</span><div class="host-code"><b id="hostCode">— — — — —</b><button id="copyHostCode">⧉ Copier</button></div><div class="host-meta"><span>Expiration : <b id="hostExpiry">Illimitée</b></span><span id="hostWaiting">En attente d’une connexion…</span></div></div>
-          <div class="host-actions"><button id="generateHostCode" disabled>Générer un code</button><button id="regenerateHostCode" class="secondary-action" disabled>Régénérer</button><button id="stopHosting" class="danger-action" hidden>Arrêter le partage</button></div>
-        </article>
-        <aside class="host-settings">
-          <h2>Options de session</h2><label>Durée<select id="webDuration"><option value="0">Illimitée (par défaut)</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 heure</option><option value="120">2 heures</option><option value="480">8 heures</option></select></label>
-          <h3>Permissions</h3>
-          <label class="check"><input id="webMouse" type="checkbox" disabled><span><b>Contrôle souris</b><small>Non disponible pour un écran hébergé par navigateur</small></span></label>
-          <label class="check"><input id="webKeyboard" type="checkbox" disabled><span><b>Contrôle clavier</b><small>Non disponible pour un écran hébergé par navigateur</small></span></label>
-          <label class="check"><input id="webClipboard" type="checkbox" checked><span><b>Presse-papiers</b><small>Texte choisi uniquement</small></span></label>
-          <label class="check"><input id="webFiles" type="checkbox" checked><span><b>Fichiers</b><small>25 Mo maximum</small></span></label>
-          <label class="check"><input id="webAudio" type="checkbox"><span><b>Audio</b><small>Si le navigateur et la source l’autorisent</small></span></label>
-          <div class="browser-limit">Un navigateur ne peut pas contrôler Windows ni fournir un accès sans surveillance. Installez l’application pour ces fonctions.</div>
-          <h3>Participants</h3><div id="participants"><small>Aucun participant connecté</small></div>
-        </aside>
-      </div>
-    </section>
+  <header class="bar">
+    <a class="brand" href="./"><img src="./logo.png" alt=""><span>Madrador <b>Remote</b></span><em>Web</em></a>
+    <div class="server"><i id="serverDot" class="dot"></i><span id="status">Connexion au serveur…</span></div>
+  </header>
 
-    <section id="connectPanel" class="connect-layout" hidden>
-      <button class="back-mode" data-back>← Choisir un autre mode</button>
+  <main class="main">
+    <!-- Choix -->
+    <section id="modePanel" class="panel">
       <div class="intro">
-        <span class="eyebrow">ACCÈS WEB SÉCURISÉ</span><h1>Contrôlez un PC.<br><em>Depuis votre navigateur.</em></h1><p>Aucune installation n’est nécessaire sur cet appareil. Madrador Remote doit simplement être ouvert sur le PC distant.</p>
-        <div class="trust-grid"><article><span>⌁</span><div><b>Connexion WebRTC</b><small>Flux direct et chiffré</small></div></article><article><span>✓</span><div><b>Consentement requis</b><small>L’hôte garde le contrôle</small></div></article><article><span>◷</span><div><b>Code temporaire</b><small>Expire automatiquement</small></div></article></div>
-        <p class="privacy">● Aucun code ni contenu de session n’est conservé dans ce navigateur.</p>
+        <h1>Que voulez-vous faire ?</h1>
+        <p>Sans rien installer. Pour être <b>dépanné</b> (laisser contrôler son PC), il faut l’<a href="./">application Windows</a>.</p>
       </div>
-      <div class="connect-card">
-        <div class="card-icon">↗</div><span class="eyebrow">REJOINDRE UNE SESSION</span><h2>Se connecter à un appareil</h2><p>Demandez à l’utilisateur distant son code à neuf chiffres.</p>
-        <label for="code">ID de connexion</label><div class="code-input"><span>⌁</span><input id="code" maxlength="11" inputmode="numeric" autocomplete="one-time-code" placeholder="000 000 000"></div>
-        <button id="connect"><span>Connexion sécurisée</span><b>→</b></button>
-        <div id="connectionProgress" class="connection-progress" hidden><i></i><div><b id="progressTitle">Demande envoyée</b><small id="progressDetail">En attente de l’autorisation du PC distant…</small></div><button id="cancelConnect">Annuler</button></div>
-        <div id="connectError" class="connect-error" hidden><b>Connexion impossible</b><span id="errorDetail"></span><button id="retryConnect">Réessayer</button></div>
-        <footer><span>Compatible Chrome, Edge et Firefox récents</span><a href="./#download">Installer l’application</a></footer>
+      <div class="choices">
+        <button id="openViewer" class="choice" type="button">
+          <span class="badge violet"><svg class="i"><use href="#i-user"/></svg></span>
+          <span><b>Aider quelqu’un</b><small>Saisissez son code pour voir et contrôler son PC.</small></span>
+          <svg class="i arrow"><use href="#i-arrow"/></svg>
+        </button>
+        <button id="openHost" class="choice" type="button">
+          <span class="badge blue"><svg class="i"><use href="#i-screen"/></svg></span>
+          <span><b>Montrer mon écran</b><small>Partagez un écran, une fenêtre ou un onglet (sans contrôle).</small></span>
+          <svg class="i arrow"><use href="#i-arrow"/></svg>
+        </button>
+      </div>
+      <p id="capabilityNotice" class="notice"></p>
+    </section>
+
+    <!-- Aider -->
+    <section id="connectPanel" class="panel" hidden>
+      <button class="back" data-back type="button"><svg class="i"><use href="#i-back"/></svg>Retour</button>
+      <div class="card narrow">
+        <h1>Aider quelqu’un</h1>
+        <p class="muted">Demandez à la personne le code à 9 chiffres affiché dans son application.</p>
+        <form id="connectForm" class="stack" autocomplete="off">
+          <label class="sr-only" for="code">Code de connexion</label>
+          <input id="code" class="code-input" inputmode="numeric" maxlength="11" placeholder="000 000 000" required>
+          <button id="connect" class="btn primary block" type="submit">Se connecter<svg class="i"><use href="#i-arrow"/></svg></button>
+        </form>
+        <div id="connectPending" class="pending" hidden>
+          <span class="spinner"></span>
+          <p><b id="pendingTitle">Demande envoyée</b><small id="pendingText">La personne doit accepter sur son ordinateur.</small></p>
+          <button id="cancelConnect" class="btn ghost" type="button">Annuler</button>
+        </div>
+        <div id="connectError" class="error" role="alert" hidden>
+          <svg class="i"><use href="#i-alert"/></svg><p><b>Connexion impossible</b><small id="errorText"></small></p>
+        </div>
       </div>
     </section>
 
-    <section id="sessionPanel" class="session-panel" hidden>
-      <div class="session-top"><div class="remote-device"><span>PC</span><div><b id="sessionDeviceName">Appareil distant</b><small><i></i> Session active</small></div></div><div class="session-meta"><span><b id="sessionDuration">00:00:00</b><small>Durée</small></span><span><b id="networkTop">—</b><small>Connexion</small></span><span id="permissions">Lecture seule</span></div></div>
-      <div class="workspace">
-        <div id="stage"><video id="video" autoplay playsinline tabindex="0"></video><div id="videoLoader"><i></i><b>Préparation du flux distant…</b></div>
-          <div class="tools">
-            <button id="fullscreen" title="Plein écran">⛶<small>Plein écran</small></button><button id="fit" title="Ajuster">⊡<small>Ajuster</small></button><button id="actual" title="Taille réelle">1:1<small>Réel</small></button>
-            <button id="zoomOut">−</button><b id="zoomLabel">100 %</b><button id="zoomIn">＋</button><i></i>
-            <button data-drawer="statsPanel">⌁<small>Qualité</small></button><button id="audio">♬<small>Audio</small></button><button data-drawer="clipboardPanel">⧉<small>Presse-papiers</small></button><button data-drawer="filePanel">⇧<small>Fichiers</small></button><button data-drawer="chatPanel">◌<small>Chat</small></button>
-          </div>
+    <!-- Montrer -->
+    <section id="hostPanel" class="panel" hidden>
+      <button class="back" data-back type="button"><svg class="i"><use href="#i-back"/></svg>Retour</button>
+      <div class="card narrow">
+        <h1>Montrer mon écran</h1>
+        <p class="muted">L’autre personne verra ce que vous partagez, mais ne pourra pas le contrôler depuis un navigateur.</p>
+        <div id="hostSetup" class="stack">
+          <button id="selectDisplay" class="source" type="button">
+            <video id="hostPreview" muted playsinline autoplay hidden></video>
+            <span id="sourceEmpty"><svg class="i"><use href="#i-screen"/></svg>Choisir un écran, une fenêtre ou un onglet</span>
+          </button>
+          <label class="toggle"><input id="webClipboard" type="checkbox" checked><span><b>Échanger du texte copié</b></span><span class="switch"></span></label>
+          <label class="toggle"><input id="webFiles" type="checkbox"><span><b>Recevoir et envoyer des fichiers</b><small>Chaque fichier doit être accepté.</small></span><span class="switch"></span></label>
+          <label class="field"><span>Validité du code</span>
+            <select id="webDuration"><option value="0">Illimitée</option><option value="15">15 minutes</option><option value="60">1 heure</option></select>
+          </label>
+          <button id="generateHostCode" class="btn primary block" type="button" disabled>Générer mon code<svg class="i"><use href="#i-arrow"/></svg></button>
         </div>
-        <aside id="drawer"><button id="closeDrawer">×</button>
-          <section id="chatPanel" class="drawer-panel"><h2>Discussion</h2><div id="messages"></div><div class="compose"><input id="message" placeholder="Votre message"><button id="sendMessage">↑</button></div></section>
-          <section id="clipboardPanel" class="drawer-panel"><h2>Presse-papiers</h2><p>Seul le texte choisi est envoyé.</p><textarea id="clipboard"></textarea><button id="sendClipboard" class="primary">Partager le texte</button></section>
-          <section id="filePanel" class="drawer-panel"><h2>Fichiers</h2><p>Transfert direct par WebRTC, 25 Mo maximum.</p><label for="file" class="drop">⇧<b>Choisir un fichier</b></label><input id="file" type="file"><button id="sendFile" class="primary">Envoyer par WebRTC</button><p id="fileStatus"></p></section>
-          <section id="statsPanel" class="drawer-panel"><h2>Statistiques</h2><div class="stats"><span>Latence <b id="latency">—</b></span><span>Codec <b id="codec">—</b></span><span>Connexion <b id="network">—</b></span><span>Résolution <b id="resolution">—</b></span></div></section>
+        <div id="hostWaiting" class="waiting" hidden>
+          <p class="muted center">Donnez ce code à l’autre personne</p>
+          <div class="code-display"><output id="hostCode">— — —</output><button id="copyHostCode" class="icon-btn" type="button" aria-label="Copier le code"><svg class="i"><use href="#i-copy"/></svg></button></div>
+          <p class="meta"><span class="pulse"></span><span id="hostWaitingText">En attente d’une demande…</span> · <span id="hostExpiry">Valable sans limite</span></p>
+          <div class="row center"><button id="regenerateHostCode" class="btn ghost" type="button">Nouveau code</button><button id="stopHosting" class="btn danger-ghost" type="button">Arrêter</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Session -->
+    <section id="sessionPanel" class="session" hidden>
+      <header class="session-bar">
+        <div class="peer"><span id="peerAvatar" class="avatar">PC</span><span><b id="peerName">Ordinateur distant</b><small><i class="dot ok"></i><span id="sessionState">Connexion…</span> · <span id="sessionDuration">00:00:00</span></small></span></div>
+        <div class="toolbar" role="toolbar" aria-label="Outils de session">
+          <button id="toggleControl" class="tool viewer-only" type="button" aria-pressed="true" title="Activer ou suspendre le contrôle"><svg class="i"><use href="#i-mouse"/></svg><span>Contrôle</span></button>
+          <div class="menu-wrap viewer-only">
+            <button id="keysButton" class="tool" type="button" aria-haspopup="menu" aria-expanded="false" title="Touches spéciales"><svg class="i"><use href="#i-keyboard"/></svg><span>Touches</span></button>
+            <div id="keysMenu" class="menu" role="menu" hidden>
+              <button role="menuitem" data-combo="win" type="button">Touche Windows</button>
+              <button role="menuitem" data-combo="alttab" type="button">Alt + Tab</button>
+              <button role="menuitem" data-combo="taskmgr" type="button">Ctrl + Maj + Échap</button>
+              <button role="menuitem" data-combo="desktop" type="button">Win + D (Bureau)</button>
+              <button role="menuitem" data-combo="altf4" type="button">Alt + F4</button>
+              <button role="menuitem" data-combo="lock" type="button">Win + L (Verrouiller)</button>
+            </div>
+          </div>
+          <span class="sep viewer-only"></span>
+          <button id="zoomFit" class="tool viewer-only" type="button" aria-pressed="true" title="Ajuster"><svg class="i"><use href="#i-fit"/></svg></button>
+          <button id="zoomOut" class="tool viewer-only" type="button" title="Réduire"><svg class="i"><use href="#i-minus"/></svg></button>
+          <button id="zoomLabel" class="tool zoom viewer-only" type="button" title="Taille réelle">Ajusté</button>
+          <button id="zoomIn" class="tool viewer-only" type="button" title="Agrandir"><svg class="i"><use href="#i-plus"/></svg></button>
+          <button id="fullscreen" class="tool" type="button" title="Plein écran"><svg class="i"><use href="#i-expand"/></svg></button>
+          <span class="sep"></span>
+          <button class="tool" data-panel="chat" type="button" title="Discussion"><svg class="i"><use href="#i-chat"/></svg><i class="unread" hidden></i></button>
+          <button class="tool" data-panel="files" type="button" title="Fichiers"><svg class="i"><use href="#i-file"/></svg></button>
+          <button class="tool" data-panel="clipboard" type="button" title="Presse-papiers"><svg class="i"><use href="#i-clipboard"/></svg></button>
+          <button class="tool" data-panel="stats" type="button" title="Qualité"><svg class="i"><use href="#i-chart"/></svg></button>
+          <button id="leave" class="btn danger" type="button"><svg class="i"><use href="#i-power"/></svg>Quitter</button>
+        </div>
+      </header>
+      <div class="session-body">
+        <div id="stage" class="stage fit">
+          <video id="video" autoplay playsinline tabindex="0" aria-label="Écran distant"></video>
+          <div id="videoLoader" class="overlay"><span class="spinner"></span><p>Connexion à l’écran…</p></div>
+        </div>
+        <aside id="side" class="side" hidden>
+          <div class="side-head"><h2 id="sideTitle">Discussion</h2><button id="closeSide" class="icon-btn" type="button" aria-label="Fermer"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="side-content" data-content="chat">
+            <div id="messages" class="messages" aria-live="polite"><p class="muted center">Les messages apparaissent ici.</p></div>
+            <form id="chatForm" class="composer"><input id="message" placeholder="Écrire un message…" maxlength="2000" aria-label="Message"><button class="icon-btn primary" type="submit" aria-label="Envoyer"><svg class="i"><use href="#i-send"/></svg></button></form>
+          </div>
+          <div class="side-content" data-content="files" hidden>
+            <label class="drop" for="file"><svg class="i"><use href="#i-file"/></svg><b id="fileLabel">Choisir un fichier</b><small>25 Mo maximum</small></label>
+            <input id="file" type="file" hidden>
+            <button id="sendFile" class="btn primary block" type="button">Envoyer</button>
+            <p id="fileStatus" class="muted" aria-live="polite"></p>
+          </div>
+          <div class="side-content" data-content="clipboard" hidden>
+            <textarea id="clipboard" rows="8" placeholder="Texte à envoyer ou reçu"></textarea>
+            <div class="row"><button id="pasteClipboard" class="btn ghost grow" type="button">Coller</button><button id="sendClipboard" class="btn primary grow" type="button">Envoyer</button></div>
+            <button id="copyClipboard" class="btn ghost block" type="button">Copier ce texte</button>
+          </div>
+          <div class="side-content" data-content="stats" hidden>
+            <dl class="stats">
+              <div><dt>Latence</dt><dd id="latency">—</dd></div>
+              <div><dt>Débit</dt><dd id="bitrate">—</dd></div>
+              <div><dt>Résolution</dt><dd id="resolution">—</dd></div>
+              <div><dt>Images/s</dt><dd id="fps">—</dd></div>
+              <div><dt>Codec</dt><dd id="codec">—</dd></div>
+              <div><dt>Liaison</dt><dd id="route">—</dd></div>
+            </dl>
+          </div>
         </aside>
       </div>
     </section>
-    <noscript>JavaScript est nécessaire pour utiliser la connexion distante.</noscript>
   </main>
-  <dialog id="webRequestDialog"><div class="web-request"><span class="mode-icon">💻</span><span class="eyebrow">DEMANDE DE CONNEXION</span><h2 id="webRequester">Un appareil souhaite se connecter</h2><p>Vous restez maître de la session et pouvez l’arrêter à tout moment.</p><div><button id="webDeny">Refuser</button><button id="webAccept">Accepter</button></div></div></dialog>
-  <div id="toasts" aria-live="polite"></div>
-  <script src="./runtime-config.js"></script><script src="./vendor/socket.io.min.js"></script><script type="module" src="./remote.js"></script>
-</body></html>
+
+  <dialog id="requestDialog" class="dialog" aria-labelledby="requestTitle">
+    <div class="dialog-body">
+      <span class="badge blue lg"><svg class="i"><use href="#i-user"/></svg></span>
+      <h2 id="requestTitle">Autoriser la connexion ?</h2>
+      <p><b id="requester">Un appareil</b> demande à voir votre écran.</p>
+      <div class="row center"><button id="deny" class="btn ghost" type="button">Refuser</button><button id="accept" class="btn primary" type="button">Accepter</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="fileDialog" class="dialog" aria-labelledby="fileTitle">
+    <div class="dialog-body">
+      <span class="badge violet lg"><svg class="i"><use href="#i-file"/></svg></span>
+      <h2 id="fileTitle">Recevoir ce fichier ?</h2>
+      <p id="fileOfferText"></p>
+      <div class="row center"><button id="rejectFile" class="btn ghost" type="button">Refuser</button><button id="acceptFile" class="btn primary" type="button">Télécharger</button></div>
+    </div>
+  </dialog>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="./runtime-config.js"></script>
+  <script src="./vendor/socket.io.min.js"></script>
+  <script type="module" src="./remote.js"></script>
+</body>
+</html>

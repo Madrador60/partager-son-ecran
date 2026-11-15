@@ -3,89 +3,205 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Madrador Remote permet d'aider un proche ou un collègue à distance avec son autorisation.">
-  <title>Madrador Remote — Assistance à distance simple et consentie</title>
-  <link rel="stylesheet" href="./site.css"><link rel="stylesheet" href="./release-notes.css">
+  <title>Madrador Remote — Assistance à distance gratuite et sans limite de durée</title>
+  <meta name="description" content="Aidez un proche à distance : voyez et contrôlez son PC Windows avec son accord, sans compte et sans limite de durée.">
+  <meta property="og:title" content="Madrador Remote">
+  <meta property="og:description" content="Aidez vos proches à distance, sans limite de durée.">
+  <link rel="icon" href="./logo.png">
+  <link rel="stylesheet" href="./site.css">
 </head>
 <body>
-  <header class="nav">
-    <a class="brand" href="./" aria-label="Accueil Madrador Remote">
-      <img src="./logo.png" alt="">
-      <span>Madrador Remote</span>
-    </a>
-    <nav aria-label="Navigation principale">
-      <a href="#fonctionnement">Fonctionnement</a>
-      <a href="#securite">Sécurité</a>
-      <a href="./remote.html">Connexion web</a>
-      <a id="navDownload" class="nav-cta" href="#">Télécharger</a>
-    </nav>
+  <svg class="sprite" aria-hidden="true">
+    <symbol id="i-screen" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-infinity" viewBox="0 0 24 24"><path d="M6.5 15.5C4 15.5 2.5 13.9 2.5 12S4 8.5 6.5 8.5c3.5 0 7.5 7 11 7 2.5 0 4-1.6 4-3.5s-1.5-3.5-4-3.5c-3.5 0-7.5 7-11 7z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-mouse" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 18v-6M9 15l3-3 3 3"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.4 6.4a8 8 0 1 0 11.2 0"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.8 2.5 15.2 0 18M12 3c-2.5 2.8-2.5 15.2 0 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  </svg>
+
+  <header class="top">
+    <div class="wrap top-inner">
+      <a class="brand" href="./"><img src="./logo.png" alt=""><span>Madrador <b>Remote</b></span></a>
+      <nav class="top-nav" aria-label="Navigation">
+        <a href="#fonctionnement">Fonctionnement</a>
+        <a href="#fonctionnalites">Fonctionnalités</a>
+        <a href="#securite">Sécurité</a>
+        <a href="#faq">Questions</a>
+        <a href="./remote.html">Version web</a>
+      </nav>
+      <a id="navDownload" class="btn primary sm" href="https://github.com/Madrador60/partager-son-ecran/releases/latest"><svg class="i"><use href="#i-download"/></svg>Télécharger</a>
+    </div>
   </header>
 
   <main>
     <section class="hero">
-      <div class="hero-copy">
-        <div class="eyebrow"><span></span> Assistance à distance pour Windows</div>
-        <h1>Aidez un écran distant, <em>en toute confiance.</em></h1>
-        <p class="lead">Partage d’écran, contrôle clavier-souris, discussion et transfert de fichiers. Chaque connexion reste visible et doit être acceptée.</p>
-        <div class="actions">
-          <a id="downloadButton" class="button primary" href="#">Télécharger pour Windows</a>
-          <a class="button secondary" href="./remote.html">Se connecter depuis le web</a>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="pill"><svg class="i"><use href="#i-infinity"/></svg>Gratuit et sans limite de durée</p>
+          <h1>Aidez vos proches à distance, aussi longtemps qu’il le faut.</h1>
+          <p class="lead">Voyez et contrôlez le PC d’un ami, avec son accord, pour régler un problème, installer un logiciel ou lui montrer comment faire. Pas de compte, pas de chronomètre.</p>
+          <div class="cta">
+            <a id="downloadButton" class="btn primary lg" href="https://github.com/Madrador60/partager-son-ecran/releases/latest"><svg class="i"><use href="#i-download"/></svg>Télécharger pour Windows</a>
+            <a class="btn ghost lg" href="./remote.html"><svg class="i"><use href="#i-globe"/></svg>Se connecter depuis le web</a>
+          </div>
+          <p id="releaseInfo" class="fine">Windows 10 et 11 · 64 bits</p>
+          <a id="releaseFallback" class="fine link" href="https://github.com/Madrador60/partager-son-ecran/releases" hidden>Voir toutes les versions</a>
         </div>
-        <p id="releaseInfo" class="fine-print">Recherche de la dernière version…</p>
-        <details id="releaseNotes" class="release-notes" hidden><summary>Notes de version</summary><div id="releaseNotesContent"></div></details>
-        <a id="releaseFallback" class="fine-print" href="https://github.com/Madrador60/partager-son-ecran/releases" hidden>Voir toutes les versions</a>
-      </div>
-      <div class="product-card" aria-label="Aperçu d'une connexion Madrador Remote">
-        <div class="window-bar"><i></i><i></i><i></i><span>Madrador Remote</span></div>
-        <div class="product-body">
-          <div class="status-pill">● Prêt à recevoir</div>
-          <p>Votre identifiant temporaire</p>
-          <strong class="code">472 819 305</strong>
-          <button type="button">Partager ce code</button>
-          <div class="trust-row"><span>🔒</span><p><b>Vous gardez le contrôle</b><br>La session peut être arrêtée à tout moment.</p></div>
+
+        <div class="hero-visual" aria-hidden="true">
+          <div class="window">
+            <div class="window-bar"><i></i><i></i><i></i><span>Madrador Remote</span></div>
+            <div class="window-body">
+              <p class="mock-label">Recevoir de l’aide</p>
+              <p class="mock-hint">Donnez ce code à la personne qui vous aide</p>
+              <div class="mock-code"><span>472 819 305</span><svg class="i"><use href="#i-copy"/></svg></div>
+              <p class="mock-wait"><i></i>En attente d’une demande · Valable sans limite</p>
+              <div class="mock-perms">
+                <span><svg class="i"><use href="#i-mouse"/></svg>Souris et clavier<b class="on"></b></span>
+                <span><svg class="i"><use href="#i-chat"/></svg>Presse-papiers<b class="on"></b></span>
+                <span><svg class="i"><use href="#i-file"/></svg>Fichiers<b></b></span>
+              </div>
+            </div>
+          </div>
+          <div class="float-card">
+            <span class="avatar">PM</span>
+            <span><b>Portable-de-Marie</b><small>demande à voir votre écran</small></span>
+            <span class="mini-btn">Accepter</span>
+          </div>
         </div>
       </div>
     </section>
 
-    <section class="proof" aria-label="Points forts">
-      <div><b>9 chiffres</b><span>Code temporaire</span></div>
-      <div><b>1 clic</b><span>Pour accepter</span></div>
-      <div><b>4 contrôles</b><span>Permissions séparées</span></div>
-      <div><b>0 compte</b><span>Pour commencer</span></div>
+    <section class="strip">
+      <ul class="wrap strip-list">
+        <li><b>0</b> compte à créer</li>
+        <li><b>9</b> chiffres pour se connecter</li>
+        <li><b>1</b> clic pour accepter</li>
+        <li><b>∞</b> durée de session</li>
+      </ul>
     </section>
 
     <section id="fonctionnement" class="section">
-      <div class="section-heading">
-        <span>Simple par conception</span>
-        <h2>Une assistance en trois étapes</h2>
-      </div>
-      <div class="steps">
-        <article><b>01</b><h3>Ouvrez l’application</h3><p>La personne aidée lance Madrador Remote et crée un code temporaire.</p></article>
-        <article><b>02</b><h3>Partagez le code</h3><p>L’assistant saisit les neuf chiffres depuis sa propre application.</p></article>
-        <article><b>03</b><h3>Acceptez la demande</h3><p>La personne aidée choisit précisément les autorisations accordées.</p></article>
+      <div class="wrap">
+        <p class="kicker">Simple</p>
+        <h2>Connectés en moins d’une minute</h2>
+        <ol class="steps">
+          <li>
+            <span class="step-n">1</span>
+            <h3>Votre ami ouvre l’application</h3>
+            <p>Il choisit l’écran à partager, ce que vous aurez le droit de faire, puis clique sur <b>Générer mon code</b>.</p>
+          </li>
+          <li>
+            <span class="step-n">2</span>
+            <h3>Il vous donne son code</h3>
+            <p>Par message ou au téléphone : 9 chiffres que vous saisissez dans <b>Aider quelqu’un</b>.</p>
+          </li>
+          <li>
+            <span class="step-n">3</span>
+            <h3>Il accepte, vous aidez</h3>
+            <p>Dès qu’il clique sur <b>Accepter</b>, vous voyez son écran et utilisez sa souris et son clavier.</p>
+          </li>
+        </ol>
       </div>
     </section>
 
-    <section id="securite" class="security">
-      <div>
-        <span class="section-label">La sécurité est visible</span>
-        <h2>Jamais d’accès silencieux.</h2>
-        <p>Une connexion ne commence qu’après une action claire sur le PC distant. Le contrôle, le presse-papiers, les fichiers et l’audio disposent chacun de leur propre permission.</p>
+    <section id="fonctionnalites" class="section alt">
+      <div class="wrap">
+        <p class="kicker">Tout le nécessaire</p>
+        <h2>Pensé pour dépanner, pas pour surveiller</h2>
+        <div class="features">
+          <article><span class="ico"><svg class="i"><use href="#i-infinity"/></svg></span><h3>Sans limite de durée</h3><p>La session reste ouverte des heures si besoin, et reprend toute seule après une coupure réseau.</p></article>
+          <article><span class="ico"><svg class="i"><use href="#i-mouse"/></svg></span><h3>Contrôle complet</h3><p>Souris, clavier, raccourcis, accents et AltGr. Le contrôle se suspend d’un clic.</p></article>
+          <article><span class="ico"><svg class="i"><use href="#i-keyboard"/></svg></span><h3>Touches spéciales</h3><p>Touche Windows, Alt+Tab, Ctrl+Maj+Échap ou Win+L envoyés au PC distant, pas au vôtre.</p></article>
+          <article><span class="ico"><svg class="i"><use href="#i-chat"/></svg></span><h3>Discussion et presse-papiers</h3><p>Échangez des messages, un mot de passe Wi-Fi ou un lien sans ressaisie.</p></article>
+          <article><span class="ico"><svg class="i"><use href="#i-file"/></svg></span><h3>Envoi de fichiers</h3><p>Jusqu’à 25 Mo par fichier, et chaque envoi doit être accepté par le destinataire.</p></article>
+          <article><span class="ico"><svg class="i"><use href="#i-screen"/></svg></span><h3>Image nette</h3><p>Choisissez un écran entier ou une fenêtre, avec trois profils : Netteté, Fluidité ou Économie pour la 4G.</p></article>
+        </div>
       </div>
-      <ul>
-        <li><span>✓</span> Codes de session temporaires</li>
-        <li><span>✓</span> Autorisation locale obligatoire</li>
-        <li><span>✓</span> Arrêt immédiat depuis les deux postes</li>
-        <li><span>✓</span> Aucune conservation des écrans sur le serveur</li>
-      </ul>
+    </section>
+
+    <section id="securite" class="section">
+      <div class="wrap split">
+        <div>
+          <p class="kicker">Sécurité</p>
+          <h2>Personne n’entre sans y être invité</h2>
+          <p class="lead">Madrador Remote est fait pour aider quelqu’un qui le demande. Chaque connexion est visible, choisie et révocable.</p>
+        </div>
+        <ul class="checks">
+          <li><svg class="i"><use href="#i-user"/></svg><span><b>Accord obligatoire</b>Chaque demande affiche le nom de l’ordinateur et doit être acceptée.</span></li>
+          <li><svg class="i"><use href="#i-shield"/></svg><span><b>Autorisations séparées</b>Souris et clavier, presse-papiers, fichiers : on choisit, et on peut changer d’avis en pleine session.</span></li>
+          <li><svg class="i"><use href="#i-lock"/></svg><span><b>Image chiffrée de bout en bout</b>L’écran passe directement entre les deux PC. Le serveur ne fait que les présenter l’un à l’autre.</span></li>
+          <li><svg class="i"><use href="#i-power"/></svg><span><b>Arrêt immédiat</b>Un clic sur « Arrêter le partage », des deux côtés, coupe tout.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <div class="wrap">
+        <p class="kicker">Application ou navigateur</p>
+        <h2>Ce dont chacun a besoin</h2>
+        <div class="table-wrap">
+          <table class="compare">
+            <thead><tr><th></th><th>Application Windows</th><th>Navigateur</th></tr></thead>
+            <tbody>
+              <tr><td>Voir et contrôler un PC distant</td><td><svg class="i ok"><use href="#i-check"/></svg></td><td><svg class="i ok"><use href="#i-check"/></svg></td></tr>
+              <tr><td>Montrer son écran</td><td><svg class="i ok"><use href="#i-check"/></svg></td><td><svg class="i ok"><use href="#i-check"/></svg></td></tr>
+              <tr><td>Laisser quelqu’un contrôler son PC</td><td><svg class="i ok"><use href="#i-check"/></svg></td><td><span class="no">Non</span></td></tr>
+              <tr><td>Rien à installer</td><td><span class="no">Non</span></td><td><svg class="i ok"><use href="#i-check"/></svg></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">En pratique : la personne dépannée installe l’application. Celle qui aide peut utiliser l’application ou le navigateur.</p>
+      </div>
+    </section>
+
+    <section id="faq" class="section">
+      <div class="wrap narrow">
+        <p class="kicker">Questions</p>
+        <h2>Questions fréquentes</h2>
+        <div class="faq">
+          <details><summary>Est-ce vraiment gratuit et illimité ?</summary><p>Oui. Il n’y a ni abonnement ni coupure au bout de quelques minutes : la session dure tant que vous ne l’arrêtez pas.</p></details>
+          <details><summary>Faut-il créer un compte ?</summary><p>Non. Le code à 9 chiffres change à chaque partage et suffit pour se connecter.</p></details>
+          <details><summary>Windows affiche « Windows a protégé votre ordinateur »</summary><p>L’installeur n’est pas encore signé par un certificat payant. Cliquez sur <b>Informations complémentaires</b> puis <b>Exécuter quand même</b>. Le code source est public sur GitHub.</p></details>
+          <details><summary>Quelqu’un peut-il se connecter sans que je le sache ?</summary><p>Non. Rien ne se passe sans votre clic sur <b>Accepter</b>, et le mode <b>Indisponible</b> refuse toutes les demandes.</p></details>
+          <details><summary>L’image reste noire, que faire ?</summary><p>Certains réseaux (4G, box très strictes) bloquent la liaison directe. Réessayez sur un autre réseau ; un relais est utilisé automatiquement quand il est configuré sur le serveur.</p></details>
+          <details><summary>Ça marche sur Mac ou Linux ?</summary><p>L’application est pour Windows 10 et 11. Depuis un Mac ou Linux, vous pouvez aider quelqu’un avec la <a href="./remote.html">version web</a>.</p></details>
+        </div>
+        <details id="releaseNotes" class="release" hidden><summary>Nouveautés de la dernière version</summary><pre id="releaseNotesContent"></pre></details>
+      </div>
+    </section>
+
+    <section class="section final">
+      <div class="wrap final-inner">
+        <h2>Prêt à dépanner quelqu’un ?</h2>
+        <p>Installez Madrador Remote sur les deux PC, et c’est parti.</p>
+        <div class="cta center">
+          <a class="btn primary lg" href="https://github.com/Madrador60/partager-son-ecran/releases/latest" data-download><svg class="i"><use href="#i-download"/></svg>Télécharger pour Windows</a>
+          <a class="btn ghost lg" href="./remote.html">Version web</a>
+        </div>
+      </div>
     </section>
   </main>
 
-  <footer>
-    <a class="brand" href="./"><img src="./logo.png" alt=""><span>Madrador Remote</span></a>
-    <p>Une assistance distante claire, visible et consentie.</p>
-    <span>© <span id="year"></span> Madrador Remote</span>
+  <footer class="foot">
+    <div class="wrap foot-inner">
+      <span class="brand small"><img src="./logo.png" alt="">Madrador Remote</span>
+      <nav aria-label="Liens"><a href="https://github.com/Madrador60/partager-son-ecran">Code source</a><a href="https://github.com/Madrador60/partager-son-ecran/releases">Versions</a><a href="https://github.com/Madrador60/partager-son-ecran/blob/main/SECURITY.md">Signaler un problème de sécurité</a></nav>
+      <small>© <span id="year">2026</span> Madrador60</small>
+    </div>
   </footer>
-  <script src="./runtime-config.js"></script><script src="./site.js"></script>
+
+  <script src="./runtime-config.js"></script>
+  <script src="./site.js"></script>
 </body>
 </html>

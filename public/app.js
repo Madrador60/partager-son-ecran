@@ -1,45 +1,80 @@
-import { captureDisplay, detectPlatform } from "./shared/capabilities.js";
+import { captureDisplay } from "./shared/capabilities.js";
 
 const bridge = window.remoteAssist;
 const $ = (id) => document.getElementById(id);
-const SERVER_KEY = "madrador.server";
-const HISTORY_KEY = "madrador.history";
-const RECENTS_KEY = "madrador.recents";
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+const KEYS = { server: "madrador.server", history: "madrador.history", recents: "madrador.recents", prefs: "madrador.prefs" };
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
-const platform = detectPlatform(bridge);
+// Profils réellement appliqués à l'encodeur WebRTC de l'hôte.
+const QUALITY = {
+  sharp: { maxBitrate: 8_000_000, maxFramerate: 30, hint: "detail", degradation: "maintain-resolution" },
+  smooth: { maxBitrate: 6_000_000, maxFramerate: 60, hint: "motion", degradation: "maintain-framerate" },
+  eco: { maxBitrate: 1_500_000, maxFramerate: 15, hint: "detail", degradation: "balanced" }
+};
+// Raccourcis que le PC de l'aidant intercepterait lui-même : envoyés explicitement.
+const COMBOS = {
+  win: { key: "Meta", code: "MetaLeft", meta: true },
+  alttab: { key: "Tab", code: "Tab", alt: true },
+  taskmgr: { key: "Escape", code: "Escape", ctrl: true, shift: true },
+  desktop: { key: "d", code: "KeyD", meta: true },
+  explorer: { key: "e", code: "KeyE", meta: true },
+  altf4: { key: "F4", code: "F4", alt: true },
+  lock: { key: "l", code: "KeyL", meta: true }
+};
+
+function readJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+}
+function writeJson(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+const prefs = Object.assign({
+  theme: "system",
+  quality: "sharp",
+  duration: 0,
+  permissions: { control: true, clipboard: true, files: false },
+  notifications: true,
+  launchAtStartup: false
+}, readJson(KEYS.prefs, {}));
+const savePrefs = () => writeJson(KEYS.prefs, prefs);
 
 const state = {
   socket: null,
+  serverUrl: "",
+  info: null,
+  role: null, // "host" | "viewer"
   peer: null,
   stream: null,
-  sessionCode: null,
-  remoteCode: null,
-  pendingViewer: null,
+  sourceName: "",
   selectedBounds: null,
+  hostCode: null,
+  remoteCode: null,
+  resumeToken: null,
+  pendingViewer: null,
+  pendingViewerName: "",
+  peerName: "",
+  permissions: { control: false, clipboard: false, files: false },
   candidateQueue: [],
   channels: {},
   incomingFile: null,
-  statsTimer: null,
-  permissions: { control: false, clipboard: false, files: false },
-  codeExpiresAt: 0,
-  codeTimer: null,
-  sessionStartedAt: 0,
-  durationTimer: null,
-  zoom: 1,
   pendingFileOffer: null,
+  available: true,
+  inputPaused: false,
+  zoom: 0, // 0 = ajusté à la fenêtre
+  sidePanel: null,
+  sessionStartedAt: 0,
+  timers: {},
   update: { status: "idle" }
-  , available: true, resumeToken: null, role: null
 };
-let systemDiagnostics = null;
 
-function isLocalServer(value) {
-  try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(value).hostname); } catch { return true; }
-}
+/* ---------- Utilitaires d'interface ---------- */
 
 function notify(message, type = "info", title = "Madrador Remote") {
   const toast = document.createElement("div");
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<span>${type === "error" ? "!" : type === "success" ? "✓" : "i"}</span>`;
+  toast.innerHTML = `<svg class="i"><use href="#i-${type === "error" ? "alert" : type === "success" ? "check" : "shield"}"/></svg>`;
   const content = document.createElement("div");
   const heading = document.createElement("b");
   const detail = document.createElement("small");
@@ -47,94 +82,293 @@ function notify(message, type = "info", title = "Madrador Remote") {
   detail.textContent = message;
   content.append(heading, detail);
   toast.append(content);
-  $("toastRegion").append(toast);
-  setTimeout(() => toast.remove(), 4200);
+  $("toasts").append(toast);
+  while ($("toasts").children.length > 4) $("toasts").firstElementChild.remove();
+  setTimeout(() => toast.remove(), 5000);
 }
 
-function showPanel(id) {
-  document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("active", panel.id === id));
-  document.querySelectorAll(".nav").forEach((button) => button.classList.toggle("active", button.dataset.panel === id));
-  $("pageTitle").textContent = { home: "Tableau de bord", session: "Session distante", history: "Historique", transfer: "Centre d’échanges", settings: "Paramètres" }[id];
-  $("pageEyebrow").textContent = { home: "ESPACE PERSONNEL", session: "CONTRÔLE À DISTANCE", history: "ACTIVITÉ LOCALE", transfer: "OUTILS DE SESSION", settings: "PRÉFÉRENCES" }[id];
+function systemNotify(title, body) {
+  if (prefs.notifications && !document.hasFocus()) bridge.showNotification({ title, body }).catch(() => {});
+}
+
+function showView(id) {
+  $$(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${id}`));
+  $$(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === id));
 }
 
 function formatCode(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 9).replace(/(\d{3})(?=\d)/g, "$1 ");
 }
 
-function addMessage(text, mine = false) {
-  const bubble = document.createElement("div");
-  bubble.className = `bubble${mine ? " mine" : ""}`;
-  bubble.textContent = String(text).slice(0, 2000);
-  $("messages").appendChild(bubble);
-  $("messages").scrollTop = $("messages").scrollHeight;
+function formatDuration(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor(totalSeconds % 3600 / 60);
+  const s = totalSeconds % 60;
+  return [h, m, s].map((value) => String(value).padStart(2, "0")).join(":");
 }
 
-function renderRecents() {
-  const recents = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
-  $("recentDevices").replaceChildren();
-  if (!recents.length) {
-    const empty = document.createElement("small");
-    empty.textContent = "Aucun appareil récent";
-    $("recentDevices").append(empty);
-    return;
-  }
-  recents.slice(0, 4).forEach((item) => {
-    const row = document.createElement("div");
-    row.className = "recent-item";
-    const name = document.createElement("span");
-    const use = document.createElement("button");
-    name.textContent = item.name || formatCode(item.code);
-    use.textContent = "Connecter →";
-    use.onclick = () => { $("remoteCode").value = formatCode(item.code); $("connect").click(); };
-    row.append(name, use);
-    $("recentDevices").append(row);
-  });
+function formatBytes(bytes) {
+  if (!bytes) return "0 o";
+  const units = ["o", "Ko", "Mo", "Go"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
+
+function relativeTime(iso) {
+  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (minutes < 1) return "à l’instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return new Date(iso).toLocaleDateString("fr-FR");
+}
+
+function initials(name) {
+  return String(name || "PC").replace(/[^\p{L}\p{N}]/gu, "").slice(0, 2).toUpperCase() || "PC";
+}
+
+function isLocalServer(value) {
+  try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(value).hostname); } catch { return true; }
+}
+
+function applyTheme() {
+  if (prefs.theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = prefs.theme;
+}
+
+function sessionCode() {
+  return state.role === "viewer" ? state.remoteCode : state.hostCode;
+}
+
+/* ---------- Historique et récents ---------- */
 
 function addHistory(entry) {
-  const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+  const history = readJson(KEYS.history, []);
   history.unshift({ id: crypto.randomUUID(), date: new Date().toISOString(), ...entry });
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 100)));
+  writeJson(KEYS.history, history.slice(0, 100));
   renderHistory();
 }
 
 function renderHistory() {
-  const query = $("historySearch").value.toLowerCase();
+  const query = $("historySearch").value.replace(/\s/g, "").toLowerCase();
   const filter = $("historyFilter").value;
-  const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]").filter((item) =>
-    (!query || String(item.device).toLowerCase().includes(query)) && (filter === "all" || item.status === filter)
-  );
+  const history = readJson(KEYS.history, []).filter((item) =>
+    (!query || `${item.code || ""}${item.device || ""}`.replace(/\s/g, "").toLowerCase().includes(query)) &&
+    (filter === "all" || item.status === filter));
   $("historyRows").replaceChildren();
-  $("historyEmpty").hidden = Boolean(history.length);
-  history.forEach((item) => {
+  $("historyEmpty").hidden = history.length > 0;
+  for (const item of history) {
     const row = document.createElement("tr");
-    const values = [item.device, new Date(item.date).toLocaleString("fr-FR"), item.duration || "—", item.type || "Distante"];
-    values.forEach((value) => { const cell = document.createElement("td"); cell.textContent = value; row.append(cell); });
+    for (const value of [item.device || formatCode(item.code), new Date(item.date).toLocaleString("fr-FR"), item.duration || "—", item.type || "—"]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
     const statusCell = document.createElement("td");
-    statusCell.innerHTML = `<span class="status-chip">${item.status === "failed" ? "Échouée" : "Terminée"}</span>`;
-    const action = document.createElement("td");
-    const retry = document.createElement("button");
-    retry.className = "button secondary";
-    retry.textContent = "Reconnecter";
-    retry.onclick = () => { $("remoteCode").value = formatCode(item.code); showPanel("home"); };
-    action.append(retry);
-    row.append(statusCell, action);
+    const chip = document.createElement("span");
+    chip.className = `chip${item.status === "failed" ? " failed" : ""}`;
+    chip.textContent = item.status === "failed" ? "Échouée" : "Terminée";
+    statusCell.append(chip);
+    const actionCell = document.createElement("td");
+    if (item.type === "Sortante" && item.code) {
+      const retry = document.createElement("button");
+      retry.className = "btn ghost";
+      retry.type = "button";
+      retry.textContent = "Reconnecter";
+      retry.onclick = () => { $("remoteCode").value = formatCode(item.code); showView("home"); $("remoteCode").focus(); };
+      actionCell.append(retry);
+    }
+    row.append(statusCell, actionCell);
     $("historyRows").append(row);
+  }
+}
+
+function rememberRecent(code) {
+  const recents = readJson(KEYS.recents, []).filter((item) => item.code !== code);
+  recents.unshift({ code, at: new Date().toISOString() });
+  writeJson(KEYS.recents, recents.slice(0, 6));
+  renderRecents();
+}
+
+function renderRecents() {
+  const recents = readJson(KEYS.recents, []);
+  $("recentList").replaceChildren();
+  $("clearRecents").hidden = recents.length === 0;
+  if (!recents.length) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "Les codes utilisés récemment apparaîtront ici.";
+    $("recentList").append(empty);
+    return;
+  }
+  for (const item of recents) {
+    const li = document.createElement("li");
+    const code = document.createElement("span");
+    code.className = "code";
+    code.textContent = formatCode(item.code);
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = item.at ? relativeTime(item.at) : "";
+    const use = document.createElement("button");
+    use.className = "btn ghost";
+    use.type = "button";
+    use.textContent = "Utiliser";
+    use.onclick = () => { $("remoteCode").value = formatCode(item.code); $("remoteCode").focus(); };
+    li.append(code, when, use);
+    $("recentList").append(li);
+  }
+}
+
+/* ---------- Partage (hôte) ---------- */
+
+function hostPermissions() {
+  return { control: $("permControl").checked, clipboard: $("permClipboard").checked, files: $("permFiles").checked };
+}
+
+async function openSourcePicker() {
+  const sources = await bridge.listSources();
+  const render = (kind) => {
+    $$("[data-source-tab]").forEach((tab) => {
+      const active = tab.dataset.sourceTab === kind;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+    });
+    $("sourceGrid").replaceChildren();
+    const list = sources.filter((source) => source.id.startsWith(`${kind}:`));
+    if (!list.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = kind === "screen" ? "Aucun écran détecté." : "Aucune fenêtre ouverte.";
+      $("sourceGrid").append(empty);
+    }
+    list.forEach((source, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      const image = document.createElement("img");
+      image.src = source.thumbnail;
+      image.alt = "";
+      const label = document.createElement("span");
+      label.textContent = kind === "screen"
+        ? `${source.display?.primary ? "Écran principal" : `Écran ${index + 1}`}${source.display ? ` · ${source.display.resolution.width}×${source.display.resolution.height}` : ""}`
+        : source.name;
+      button.append(image, label);
+      button.onclick = () => selectSource(source, label.textContent).catch((error) => notify(error.message, "error", "Capture impossible"));
+      $("sourceGrid").append(button);
+    });
+  };
+  $$("[data-source-tab]").forEach((tab) => { tab.onclick = () => render(tab.dataset.sourceTab); });
+  render("screen");
+  $("sourceDialog").showModal();
+}
+
+async function selectSource(source, label) {
+  const stream = await captureDisplay({ bridge, sourceId: source.id });
+  state.stream?.getTracks().forEach((track) => track.stop());
+  state.stream = stream;
+  state.sourceName = label;
+  state.selectedBounds = source.bounds;
+  $("sourcePreview").srcObject = stream;
+  $("sourcePreview").hidden = false;
+  $("sourceEmpty").hidden = true;
+  $("chooseSource").classList.add("has-source");
+  $("sourceName").textContent = `${label} · cliquez pour changer`;
+  $("sourceDialog").close();
+  // Si une session est déjà en cours, remplacer la piste sans renégocier.
+  const sender = state.peer?.getSenders().find((item) => item.track?.kind === "video");
+  if (sender) {
+    await sender.replaceTrack(stream.getVideoTracks()[0]);
+    $("localVideo").srcObject = stream;
+    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+  }
+}
+
+function createHostCode() {
+  if (!state.stream) {
+    notify("Choisissez d’abord l’écran à partager.", "error");
+    openSourcePicker().catch((error) => notify(error.message, "error"));
+    return;
+  }
+  if (!state.socket?.connected) return notify("Le serveur de connexion est injoignable pour le moment.", "error");
+  state.permissions = hostPermissions();
+  state.socket.emit("host-create", {
+    deviceName: state.info.hostname,
+    permissions: state.permissions,
+    durationMinutes: Number($("durationSelect").value),
+    available: state.available
   });
 }
 
-function activeCode() {
-  return state.remoteCode || state.sessionCode;
+function showHostWaiting(code, expiresAt) {
+  $("hostSetup").hidden = true;
+  $("hostWaiting").hidden = false;
+  $("hostCode").textContent = formatCode(code);
+  $("hostWaitingText").textContent = state.available ? "En attente d’une demande de connexion…" : "Indisponible : les demandes sont refusées.";
+  clearInterval(state.timers.code);
+  if (!expiresAt) {
+    $("codeValidity").textContent = "Valable sans limite";
+    return;
+  }
+  const tick = () => {
+    const remaining = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+    $("codeValidity").textContent = remaining ? `Expire dans ${formatDuration(remaining).replace(/^00:/, "")}` : "Code expiré";
+    if (!remaining) clearInterval(state.timers.code);
+  };
+  tick();
+  state.timers.code = setInterval(tick, 1000);
 }
 
-function activePermissions() {
-  return {
-    control: $("allowControl").checked,
-    clipboard: $("allowClipboard").checked,
-    files: $("allowFiles").checked
-  };
+function resetHostCard({ keepStream = true } = {}) {
+  clearInterval(state.timers.code);
+  state.hostCode = null;
+  bridge.setHostCode("");
+  $("hostSetup").hidden = false;
+  $("hostWaiting").hidden = true;
+  if (!keepStream) {
+    state.stream?.getTracks().forEach((track) => track.stop());
+    state.stream = null;
+    $("sourcePreview").srcObject = null;
+    $("sourcePreview").hidden = true;
+    $("sourceEmpty").hidden = false;
+    $("chooseSource").classList.remove("has-source");
+    $("sourceName").textContent = "";
+  }
 }
+
+function stopHosting() {
+  if (state.hostCode) state.socket.emit("end-session", { code: state.hostCode });
+  resetHostCard({ keepStream: false });
+  notify("Le partage est arrêté.");
+}
+
+/* ---------- Connexion (aidant) ---------- */
+
+function setViewerPending(pending, title = "Demande envoyée", text = "La personne doit accepter sur son ordinateur.") {
+  $("viewerPending").hidden = !pending;
+  $("connectForm").hidden = pending;
+  $("viewerPendingTitle").textContent = title;
+  $("viewerPendingText").textContent = text;
+}
+
+function requestConnection(event) {
+  event.preventDefault();
+  const code = $("remoteCode").value.replace(/\D/g, "");
+  if (code.length !== 9) return notify("Le code contient 9 chiffres.", "error");
+  if (code === state.hostCode) return notify("C’est le code de cet ordinateur : saisissez celui de votre ami.", "error");
+  if (!state.socket?.connected) return notify("Le serveur de connexion est injoignable pour le moment.", "error");
+  if (state.peer) return notify("Une session est déjà en cours.", "error");
+  state.remoteCode = code;
+  state.socket.emit("viewer-request", { code, deviceName: state.info.hostname });
+  rememberRecent(code);
+  setViewerPending(true);
+}
+
+function cancelConnection() {
+  // Le serveur ne connaît pas d'annulation : une approbation tardive sera refermée aussitôt.
+  state.remoteCode = null;
+  setViewerPending(false);
+}
+
+/* ---------- WebRTC ---------- */
 
 async function flushCandidates() {
   if (!state.peer?.remoteDescription) return;
@@ -143,20 +377,28 @@ async function flushCandidates() {
   }
 }
 
-function tuneVideoSenders(peer) {
-  // Débit plus élevé que le défaut WebRTC (~2,5 Mb/s) pour un texte lisible.
+async function applyQuality(peer = state.peer) {
+  if (!peer || state.role !== "host") return;
+  const profile = QUALITY[prefs.quality] || QUALITY.sharp;
   for (const sender of peer.getSenders()) {
     if (sender.track?.kind !== "video") continue;
+    sender.track.contentHint = profile.hint;
     const parameters = sender.getParameters();
     if (!parameters.encodings?.length) continue;
-    parameters.encodings[0].maxBitrate = 8_000_000;
-    parameters.degradationPreference = "maintain-resolution";
-    sender.setParameters(parameters).catch(() => {});
+    parameters.encodings[0].maxBitrate = profile.maxBitrate;
+    parameters.encodings[0].maxFramerate = profile.maxFramerate;
+    parameters.degradationPreference = profile.degradation;
+    await sender.setParameters(parameters).catch(() => {});
   }
 }
 
+async function sendOffer(peer, iceRestart = false) {
+  const offer = await peer.createOffer(iceRestart ? { iceRestart: true } : undefined);
+  await peer.setLocalDescription(offer);
+  state.socket.emit("signal", { code: sessionCode(), data: { type: "offer", sdp: peer.localDescription } });
+}
+
 async function createPeer(isHost) {
-  // Le processus principal récupère les identifiants TURN temporaires du serveur partagé.
   const iceServers = await bridge.getIceServers(state.serverUrl);
   const peer = new RTCPeerConnection({ iceServers, bundlePolicy: "max-bundle" });
   state.peer = peer;
@@ -164,37 +406,30 @@ async function createPeer(isHost) {
   state.candidateQueue = [];
 
   peer.onicecandidate = ({ candidate }) => {
-    if (candidate) state.socket.emit("signal", { code: activeCode(), data: { type: "candidate", candidate } });
+    if (candidate) state.socket.emit("signal", { code: sessionCode(), data: { type: "candidate", candidate } });
   };
   peer.onconnectionstatechange = () => {
-    $("sessionState").textContent = peer.connectionState;
-    if (peer.connectionState === "connected") {
-      notify("Connexion établie", "success");
-      bridge.setSessionActive(true);
+    const labels = { new: "Préparation…", connecting: "Connexion…", connected: "Connecté", disconnected: "Connexion instable…", failed: "Reconnexion…", closed: "Terminé" };
+    setSessionStatus(labels[peer.connectionState] || peer.connectionState);
+    if (peer.connectionState === "connected" && !state.sessionStartedAt) {
       state.sessionStartedAt = Date.now();
-      startDuration();
-      $("sessionNavDot").classList.add("live");
-      showPanel("session");
+      startSessionTimer();
+      bridge.setSessionActive(true);
+      $("sessionLive").hidden = false;
       monitorStats(peer);
-      if (isHost) tuneVideoSenders(peer);
+      applyQuality(peer);
+      notify(isHost ? "Votre écran est maintenant partagé." : "Vous voyez l’écran distant.", "success", "Connexion établie");
     }
     if (peer.connectionState === "failed") {
-      $("sessionState").textContent = "Reconnexion en cours";
-      notify("La liaison est interrompue. Tentative de reprise…", "info", "Reconnexion");
       peer.restartIce();
-      // Seul l'hôte (émetteur de l'offre) renégocie, sinon les deux offres se croisent.
-      if (isHost) {
-        peer.createOffer({ iceRestart: true })
-          .then((offer) => peer.setLocalDescription(offer))
-          .then(() => state.socket.emit("signal", { code: activeCode(), data: { type: "offer", sdp: peer.localDescription } }))
-          .catch((error) => console.warn(error));
-      }
+      if (isHost) sendOffer(peer, true).catch((error) => console.warn(error));
     }
   };
   if (!isHost) {
     peer.ontrack = ({ streams }) => {
       $("remoteVideo").srcObject = streams[0];
-      $("screenEmpty").hidden = true;
+      $("stageOverlay").hidden = true;
+      updateControlUi();
       $("remoteVideo").focus();
     };
   }
@@ -202,21 +437,10 @@ async function createPeer(isHost) {
     state.channels[channel.label] = channel;
     channel.onmessage = async ({ data }) => {
       if (channel.label === "input-fast" || channel.label === "commands") {
-        try { await bridge.sendRemoteInput(JSON.parse(data)); } catch (error) { notify(`Commande refusée : ${error.message}`, "error"); }
+        if (state.role !== "host") return;
+        try { await bridge.sendRemoteInput(JSON.parse(data)); } catch (error) { console.warn(error); }
       } else if (channel.label === "file-transfer") {
-        if (typeof data === "string") {
-          const message = JSON.parse(data);
-          if (message.type === "start") state.incomingFile = { name: message.name, size: message.size, chunks: [], received: 0 };
-          if (message.type === "end" && state.incomingFile) {
-            const blob = new Blob(state.incomingFile.chunks);
-            await bridge.saveReceivedFile({ name: state.incomingFile.name, data: await blob.arrayBuffer() });
-            state.incomingFile = null;
-          }
-        } else if (state.incomingFile) {
-          state.incomingFile.chunks.push(data);
-          state.incomingFile.received += data.byteLength;
-          $("fileStatus").textContent = `${Math.round(state.incomingFile.received / state.incomingFile.size * 100)} % reçus`;
-        }
+        await receiveFileChunk(data);
       }
     };
   };
@@ -229,6 +453,23 @@ async function createPeer(isHost) {
   return peer;
 }
 
+async function receiveFileChunk(data) {
+  if (typeof data === "string") {
+    const message = JSON.parse(data);
+    if (message.type === "start") state.incomingFile = { name: message.name, size: message.size, chunks: [], received: 0 };
+    if (message.type === "end" && state.incomingFile) {
+      const blob = new Blob(state.incomingFile.chunks);
+      const result = await bridge.saveReceivedFile({ name: state.incomingFile.name, data: await blob.arrayBuffer() });
+      $("fileStatus").textContent = result.ok ? `Enregistré : ${result.path}` : "Enregistrement annulé.";
+      state.incomingFile = null;
+    }
+  } else if (state.incomingFile) {
+    state.incomingFile.chunks.push(data);
+    state.incomingFile.received += data.byteLength;
+    $("fileStatus").textContent = `Réception : ${Math.round(state.incomingFile.received / state.incomingFile.size * 100)} %`;
+  }
+}
+
 async function handleSignal({ data }) {
   if (!state.peer) return;
   if (data.type === "offer") {
@@ -236,7 +477,7 @@ async function handleSignal({ data }) {
     await flushCandidates();
     const answer = await state.peer.createAnswer();
     await state.peer.setLocalDescription(answer);
-    state.socket.emit("signal", { code: activeCode(), data: { type: "answer", sdp: state.peer.localDescription } });
+    state.socket.emit("signal", { code: sessionCode(), data: { type: "answer", sdp: state.peer.localDescription } });
   } else if (data.type === "answer") {
     await state.peer.setRemoteDescription(data.sdp);
     await flushCandidates();
@@ -246,228 +487,209 @@ async function handleSignal({ data }) {
   }
 }
 
-function bindSocket(socket) {
-  socket.on("connect", () => {
-    $("onlineDot").classList.add("online");
-    $("connectionLabel").textContent = "Serveur connecté";
-    $("deviceStatus").textContent = "Prêt à recevoir";
-    if (state.sessionCode && state.resumeToken && state.role) {
-      socket.emit("resume-session", { code: state.sessionCode, resumeToken: state.resumeToken, role: state.role });
-    }
-  });
-  socket.on("disconnect", () => {
-    $("onlineDot").classList.remove("online");
-    $("connectionLabel").textContent = "Serveur hors ligne";
-  });
-  socket.on("connect_error", () => notify("Serveur inaccessible. Nouvelle tentative automatique.", "error"));
-  socket.on("host-created", ({ code, expiresAt, resumeToken }) => {
-    state.sessionCode = code;
-    state.resumeToken = resumeToken;
-    state.role = "host";
-    $("localCode").textContent = formatCode(code);
-    $("copyCode").disabled = false;
-    $("codeState").textContent = "Code actif";
-    $("codeState").classList.remove("muted");
-    state.codeExpiresAt = expiresAt || 0;
-    startCodeTimer();
-    bridge.setHostCode(code);
-    notify(expiresAt ? `Code valable jusqu’à ${new Date(expiresAt).toLocaleTimeString()}` : "Code prêt, sans limite de durée", "success");
-  });
-  socket.on("session-expired", () => {
-    state.sessionCode = null;
-    $("localCode").textContent = "Code expiré";
-    $("copyCode").disabled = true;
-    $("codeState").textContent = "Code expiré";
-    $("codeState").classList.add("muted");
-    bridge.setHostCode("");
-  });
-  socket.on("incoming-request", ({ viewerSocketId, deviceName }) => {
-    state.pendingViewer = viewerSocketId;
-    $("requester").textContent = `${deviceName || "Un ordinateur"} souhaite voir votre écran.`;
-    $("requestDialog").showModal();
-    bridge.showNotification({ title: "Demande de connexion", body: `${deviceName || "Un ordinateur"} souhaite se connecter.` });
-  });
-  socket.on("viewer-approved", async ({ code, permissions, resumeToken }) => {
-    state.remoteCode = code;
-    state.sessionCode = code;
-    state.resumeToken = resumeToken;
-    state.role = "viewer";
-    state.permissions = permissions;
-    await createPeer(false);
-    $("remoteName").textContent = "Appareil distant";
-    notify("Demande acceptée", "success");
-  });
-  socket.on("viewer-denied", ({ reason }) => { notify(reason, "error", "Connexion refusée"); addHistory({ device: formatCode(state.remoteCode), code: state.remoteCode, type: "Sortante", status: "failed" }); });
-  socket.on("host-unavailable", ({ reason }) => notify(reason, "error", "Appareil indisponible"));
-  socket.on("peer-reconnecting", () => notify("Connexion interrompue. Reprise automatique en cours…", "info", "Reconnexion"));
-  socket.on("peer-resumed", async () => {
-    notify("Connexion rétablie", "success");
-    if (state.peer && state.role === "host") {
-      state.peer.restartIce();
-      const offer = await state.peer.createOffer({ iceRestart: true });
-      await state.peer.setLocalDescription(offer);
-      socket.emit("signal", { code: activeCode(), data: { type: "offer", sdp: state.peer.localDescription } });
-    }
-  });
-  socket.on("session-resumed", () => notify("Session reprise", "success"));
-  socket.on("resume-denied", () => {
-    // Le serveur a pu redémarrer : la liaison directe WebRTC continue de fonctionner,
-    // on ne coupe donc pas une session qui marche encore.
-    if (state.peer && ["connected", "connecting"].includes(state.peer.connectionState)) {
-      notify("Le serveur a redémarré. L’écran et le contrôle continuent ; le chat et les fichiers reviendront à la prochaine session.", "info", "Session maintenue");
-      return;
-    }
-    notify("La période de reprise est terminée.", "error", "Session expirée");
-    stopSession(false);
-  });
-  socket.on("viewer-ready", async () => {
-    if (!state.stream) return notify("Sélectionnez d’abord un écran", "error");
-    const peer = await createPeer(true);
-    for (const track of state.stream.getTracks()) {
-      // "detail" privilégie la netteté du texte plutôt que la fluidité : idéal pour dépanner.
-      if (track.kind === "video") track.contentHint = "detail";
-      peer.addTrack(track, state.stream);
-    }
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    socket.emit("signal", { code: state.sessionCode, data: { type: "offer", sdp: peer.localDescription } });
-  });
-  socket.on("signal", (payload) => handleSignal(payload).catch((error) => notify(`Connexion impossible : ${error.message}`, "error")));
-  socket.on("permissions-state", (permissions) => { state.permissions = permissions; });
-  socket.on("remote-input", (payload) => bridge.sendRemoteInput(payload));
-  socket.on("chat-message", ({ text }) => addMessage(text));
-  socket.on("clipboard-share", ({ text }) => {
-    $("clipboardText").value = text;
-    notify("Presse-papiers synchronisé", "success");
-  });
-  socket.on("file-offer", ({ id, name, size }) => {
-    state.pendingFileOffer = { id, name, size };
-    $("fileOfferText").textContent = `${name} · ${Math.ceil(size / 1024)} Ko`;
-    $("fileDialog").showModal();
-  });
-  socket.on("file-decision", async ({ id, accepted }) => {
-    const file = $("fileInput").files[0];
-    if (!accepted || !file || id !== `${file.name}:${file.size}`) return notify("Le fichier a été refusé", "error");
-    socket.emit("file-data", { id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
-    $("fileStatus").textContent = "Fichier envoyé";
-  });
-  socket.on("file-data", async ({ name, data }) => {
-    const result = await bridge.saveReceivedFile({ name, data });
-    $("fileStatus").textContent = result.ok ? "Fichier enregistré" : "Enregistrement annulé";
-  });
-  socket.on("session-ended", () => stopSession(false));
-  socket.on("viewer-left", () => {
-    bridge.setControlEnabled({ enabled: false, bounds: null });
-    notify("Le correspondant a quitté la session", "error", "Session terminée");
-  });
+/* ---------- Vue de session ---------- */
+
+function setSessionStatus(text) {
+  $("sessionStatus").textContent = text;
+  $("hostSessionStatus").textContent = text;
 }
 
-async function chooseSource() {
-  const sources = await bridge.listSources();
-  $("sourceGrid").replaceChildren();
-  for (const source of sources) {
-    const button = document.createElement("button");
-    const image = document.createElement("img");
-    const label = document.createElement("b");
-    image.src = source.thumbnail;
-    label.textContent = source.name;
-    button.append(image, label);
-    button.onclick = async (event) => {
-      event.preventDefault();
-      state.stream?.getTracks().forEach((track) => track.stop());
-      state.stream = await captureDisplay({ bridge, sourceId: source.id });
-      state.selectedBounds = source.bounds;
-      $("localVideo").srcObject = state.stream;
-      $("sourceLabel").textContent = source.name;
-      $("sourceDialog").close();
-      notify("Écran prêt à partager", "success");
-    };
-    $("sourceGrid").appendChild(button);
-  }
-  $("sourceDialog").showModal();
-}
-
-async function stopSession(shouldNotify = true) {
-  const endedCode = activeCode();
-  const wasRemote = Boolean(state.remoteCode);
-  if (shouldNotify && endedCode) state.socket.emit("end-session", { code: endedCode });
-  clearInterval(state.statsTimer);
-  state.stream?.getTracks().forEach((track) => track.stop());
-  state.peer?.close();
-  await bridge.setControlEnabled({ enabled: false, bounds: null });
-  Object.assign(state, { peer: null, stream: null, sessionCode: null, remoteCode: null, resumeToken: null, role: null, selectedBounds: null, candidateQueue: [] });
-  state.channels = {};
-  state.incomingFile = null;
-  $("remoteVideo").srcObject = null;
-  $("localVideo").srcObject = null;
-  $("screenEmpty").hidden = false;
-  $("sessionState").textContent = "Aucune session";
-  bridge.setSessionActive(false);
-  $("sessionNavDot").classList.remove("live");
-  clearInterval(state.durationTimer);
-  if (state.sessionStartedAt) {
-    const seconds = Math.max(0, Math.floor((Date.now() - state.sessionStartedAt) / 1000));
-    addHistory({ device: formatCode(endedCode || "000000000"), code: endedCode, duration: formatDuration(seconds), type: wasRemote ? "Sortante" : "Entrante", status: "completed" });
-  }
-  state.sessionStartedAt = 0;
-  notifyUser("Session arrêtée");
-  showPanel("home");
-}
-
-function notifyUser(message) { notify(message, "info"); }
-function formatDuration(total) {
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor(total % 3600 / 60);
-  const seconds = total % 60;
-  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
-}
-function startDuration() {
-  clearInterval(state.durationTimer);
-  const tick = () => { $("sessionDuration").textContent = formatDuration(Math.floor((Date.now() - state.sessionStartedAt) / 1000)); };
-  tick();
-  state.durationTimer = setInterval(tick, 1000);
-}
-function startCodeTimer() {
-  clearInterval(state.codeTimer);
-  if (!state.codeExpiresAt) {
-    $("codeTimer").textContent = "Illimitée";
-    return;
-  }
+function startSessionTimer() {
+  clearInterval(state.timers.session);
   const tick = () => {
-    const remaining = Math.max(0, Math.ceil((state.codeExpiresAt - Date.now()) / 1000));
-    $("codeTimer").textContent = `${String(Math.floor(remaining / 60)).padStart(2, "0")}:${String(remaining % 60).padStart(2, "0")}`;
-    if (!remaining) clearInterval(state.codeTimer);
+    const text = formatDuration(Math.floor((Date.now() - state.sessionStartedAt) / 1000));
+    $("sessionTimer").textContent = text;
+    $("hostSessionTimer").textContent = text;
   };
   tick();
-  state.codeTimer = setInterval(tick, 1000);
+  state.timers.session = setInterval(tick, 1000);
+}
+
+function enterSession(role) {
+  state.role = role;
+  state.sessionStartedAt = 0;
+  $("sessionEmpty").hidden = true;
+  $("viewerSession").hidden = role !== "viewer";
+  $("hostSession").hidden = role !== "host";
+  setSessionStatus("Connexion…");
+  $("sessionTimer").textContent = "00:00:00";
+  $("hostSessionTimer").textContent = "00:00:00";
+  $("messages").replaceChildren();
+  $("fileStatus").textContent = "";
+  $("clipboardText").value = "";
+  closeSidePanel();
+  if (role === "viewer") {
+    $("peerName").textContent = state.peerName || "Ordinateur distant";
+    $("peerAvatar").textContent = initials(state.peerName);
+    $("stageOverlay").hidden = false;
+    $("stageOverlayText").textContent = "Connexion à l’écran distant…";
+    state.inputPaused = false;
+    setZoom(0);
+  } else {
+    $("hostPeerName").textContent = state.pendingViewerName || "un ordinateur";
+    $("localVideo").srcObject = state.stream;
+    syncLivePermissions();
+  }
+  updateToolAvailability();
+  showView("session");
+}
+
+async function endSession({ notifyPeer = true, reason = "Session terminée." } = {}) {
+  const code = sessionCode();
+  const role = state.role;
+  if (!role) return;
+  if (notifyPeer && code) state.socket.emit("end-session", { code });
+  clearInterval(state.timers.stats);
+  clearInterval(state.timers.session);
+  state.peer?.close();
+  await bridge.setControlEnabled({ enabled: false, bounds: null }).catch(() => {});
+  if (state.sessionStartedAt) {
+    addHistory({
+      code,
+      device: role === "viewer" ? `${state.peerName || "Ordinateur"} · ${formatCode(code)}` : `${state.pendingViewerName || "Ordinateur"}`,
+      duration: formatDuration(Math.floor((Date.now() - state.sessionStartedAt) / 1000)),
+      type: role === "viewer" ? "Sortante" : "Entrante",
+      status: "completed"
+    });
+  }
+  Object.assign(state, { peer: null, role: null, resumeToken: null, remoteCode: null, candidateQueue: [], channels: {}, incomingFile: null, sessionStartedAt: 0 });
+  $("remoteVideo").srcObject = null;
+  $("localVideo").srcObject = null;
+  $("viewerSession").hidden = true;
+  $("hostSession").hidden = true;
+  $("sessionEmpty").hidden = false;
+  $("sessionLive").hidden = true;
+  bridge.setSessionActive(false);
+  setViewerPending(false);
+  if (role === "host") resetHostCard({ keepStream: true });
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  showView("home");
+  notify(reason);
+}
+
+function updateToolAvailability() {
+  const { clipboard, files } = state.permissions;
+  $$('[data-panel="clipboard"]').forEach((button) => { button.disabled = !clipboard; });
+  $$('[data-panel="files"]').forEach((button) => { button.disabled = !files; });
+  if ((state.sidePanel === "clipboard" && !clipboard) || (state.sidePanel === "files" && !files)) closeSidePanel();
+  updateControlUi();
+}
+
+function updateControlUi() {
+  const allowed = Boolean(state.permissions.control);
+  const active = allowed && !state.inputPaused;
+  $("toggleControl").disabled = !allowed;
+  $("toggleControl").setAttribute("aria-pressed", String(active));
+  $("toggleControl").title = allowed ? (active ? "Suspendre le contrôle" : "Reprendre le contrôle") : "L’autre personne n’a pas autorisé le contrôle";
+  $("keysMenuButton").disabled = !active;
+  $("stage").classList.toggle("no-control", !active);
+  $("controlHint").hidden = !active || !$("stageOverlay").hidden;
+  if ($("controlHint").hidden === false) setTimeout(() => { $("controlHint").hidden = true; }, 5000);
+}
+
+function syncLivePermissions() {
+  $("livePermControl").checked = state.permissions.control;
+  $("livePermClipboard").checked = state.permissions.clipboard;
+  $("livePermFiles").checked = state.permissions.files;
+}
+
+async function applyLivePermissions() {
+  state.permissions = { control: $("livePermControl").checked, clipboard: $("livePermClipboard").checked, files: $("livePermFiles").checked };
+  state.socket.emit("set-permissions", { code: state.hostCode, permissions: state.permissions });
+  await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+  updateToolAvailability();
+}
+
+function openSidePanel(name) {
+  if (state.sidePanel === name) return closeSidePanel();
+  const container = state.role === "host" ? $("sidePanelHost") : $("sidePanelViewer");
+  container.append($("sidePanel"));
+  container.hidden = false;
+  state.sidePanel = name;
+  $("sideTitle").textContent = { chat: "Discussion", files: "Fichiers", clipboard: "Presse-papiers", stats: "Qualité de connexion" }[name];
+  $$(".side-content").forEach((content) => { content.hidden = content.dataset.content !== name; });
+  $$("[data-panel]").forEach((button) => button.classList.toggle("active", button.dataset.panel === name));
+  if (name === "chat") {
+    $$('[data-panel="chat"] .unread').forEach((dot) => { dot.hidden = true; });
+    $("messageInput").focus();
+  }
+}
+
+function closeSidePanel() {
+  state.sidePanel = null;
+  $("sidePanelHost").hidden = true;
+  $("sidePanelViewer").hidden = true;
+  $$("[data-panel]").forEach((button) => button.classList.remove("active"));
+}
+
+function addMessage(text, mine = false) {
+  if ($("messages").querySelector(".muted")) $("messages").replaceChildren();
+  const bubble = document.createElement("div");
+  bubble.className = `bubble${mine ? " mine" : ""}`;
+  bubble.textContent = String(text).slice(0, 2000);
+  $("messages").append(bubble);
+  $("messages").scrollTop = $("messages").scrollHeight;
+  if (!mine && state.sidePanel !== "chat") {
+    $$('[data-panel="chat"] .unread').forEach((dot) => { dot.hidden = false; });
+    notify(String(text).slice(0, 140), "info", "Nouveau message");
+  }
+}
+
+function setZoom(level) {
+  state.zoom = level;
+  const stage = $("stage");
+  const video = $("remoteVideo");
+  stage.classList.toggle("fit", level === 0);
+  stage.classList.toggle("zoomed", level !== 0);
+  $("zoomFit").setAttribute("aria-pressed", String(level === 0));
+  $("zoomLabel").textContent = level === 0 ? "Ajusté" : `${Math.round(level * 100)} %`;
+  if (level === 0) {
+    video.style.width = "";
+    video.style.height = "";
+  } else if (video.videoWidth) {
+    video.style.width = `${Math.round(video.videoWidth * level)}px`;
+    video.style.height = `${Math.round(video.videoHeight * level)}px`;
+  }
 }
 
 function monitorStats(peer) {
-  clearInterval(state.statsTimer);
-  let lastBytes = 0;
-  let lastAt = performance.now();
-  state.statsTimer = setInterval(async () => {
+  clearInterval(state.timers.stats);
+  let last = { bytes: 0, at: performance.now() };
+  state.timers.stats = setInterval(async () => {
+    if (peer.connectionState !== "connected") return;
     const report = await peer.getStats();
+    let rtp = null;
+    let pair = null;
+    const byId = new Map();
     report.forEach((item) => {
-      if (item.type === "inbound-rtp" && item.kind === "video") {
-        const now = performance.now();
-        const mbps = Math.max(0, (item.bytesReceived - lastBytes) * 8 / (now - lastAt) / 1000);
-        lastBytes = item.bytesReceived;
-        lastAt = now;
-        $("bitrate").textContent = `${mbps.toFixed(1)} Mb/s`;
-        $("resolution").textContent = item.frameWidth ? `${item.frameWidth}×${item.frameHeight}` : "—";
-        $("sessionQuality").textContent = mbps > 3 ? "Excellente" : mbps > 1 ? "Bonne" : "Limitée";
-      }
-      if (item.type === "candidate-pair" && item.state === "succeeded") {
-        $("latency").textContent = `${Math.round((item.currentRoundTripTime || 0) * 1000)} ms`;
-        $("transport").textContent = item.localCandidateId ? "WebRTC" : "—";
-      }
+      byId.set(item.id, item);
+      if (item.type === "inbound-rtp" && item.kind === "video") rtp = item;
+      if (item.type === "outbound-rtp" && item.kind === "video" && !rtp) rtp = item;
+      if (item.type === "candidate-pair" && item.nominated && item.state === "succeeded") pair = item;
     });
+    if (rtp) {
+      const bytes = rtp.bytesReceived ?? rtp.bytesSent ?? 0;
+      const now = performance.now();
+      const mbps = Math.max(0, (bytes - last.bytes) * 8 / (now - last.at) / 1000);
+      last = { bytes, at: now };
+      $("statBitrate").textContent = `${mbps.toFixed(1)} Mb/s`;
+      $("statResolution").textContent = rtp.frameWidth ? `${rtp.frameWidth}×${rtp.frameHeight}` : "—";
+      $("statFps").textContent = rtp.framesPerSecond ? String(Math.round(rtp.framesPerSecond)) : "—";
+    }
+    if (pair) {
+      const rtt = Math.round((pair.currentRoundTripTime || 0) * 1000);
+      $("statLatency").textContent = `${rtt} ms`;
+      const local = byId.get(pair.localCandidateId);
+      const remote = byId.get(pair.remoteCandidateId);
+      $("statRoute").textContent = local?.candidateType === "relay" || remote?.candidateType === "relay" ? "Relais" : "Directe";
+      $("statQuality").textContent = rtt < 80 ? "Excellente" : rtt < 180 ? "Bonne" : "Lente";
+    }
   }, 1000);
 }
 
+/* ---------- Contrôle à distance (aidant) ---------- */
+
 function videoPoint(event) {
-  // Tient compte des bandes noires (object-fit: contain) pour viser au pixel près.
   const video = $("remoteVideo");
   const rect = video.getBoundingClientRect();
   const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : rect.width / rect.height;
@@ -482,243 +704,193 @@ function videoPoint(event) {
   };
 }
 
+function canControl() {
+  return state.role === "viewer" && state.permissions.control && !state.inputPaused && state.remoteCode;
+}
+
 function sendPayload(payload) {
-  if (!state.remoteCode || !state.permissions.control) return;
-  // Connexion directe WebRTC en priorité, serveur en secours.
+  if (!canControl()) return;
   const channel = state.channels[payload.type === "mousemove" ? "input-fast" : "commands"];
   if (channel?.readyState === "open") channel.send(JSON.stringify(payload));
   else state.socket.emit("remote-input", { code: state.remoteCode, payload });
 }
 
-function sendInput(type, event, extra = {}) {
-  sendPayload({ type, ...videoPoint(event), ...extra });
-}
-
-function sendKey(event) {
-  if (!state.remoteCode || !state.permissions.control) return;
-  event.preventDefault();
-  sendPayload({ type: "keydown", key: event.key.slice(0, 40), code: event.code.slice(0, 40), ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey });
-}
-
-async function init() {
-  if (!bridge) throw new Error("API Electron indisponible");
-  document.body.dataset.platform = platform.kind;
-  const info = await bridge.systemInfo();
-  systemDiagnostics = info;
-  $("deviceLabel").textContent = `${info.hostname} · ${info.displays} écran(s)`;
-  $("computerName").textContent = info.hostname;
-  $("sidebarDevice").textContent = info.hostname;
-  $("avatar").textContent = info.hostname.slice(0, 2).toUpperCase();
-  $("localIp").textContent = info.localIp;
-  $("installedVersion").textContent = `v${info.version}`;
-  $("sidebarVersion").textContent = `Version ${info.version}`;
-  $("aboutVersion").textContent = `Version ${info.version}`;
-  const configured = localStorage.getItem(SERVER_KEY) || await bridge.getSignalUrl();
-  if (!configured) throw new Error("Le serveur intégré n’a pas pu démarrer.");
-  state.serverUrl = configured;
-  $("serverUrl").value = configured;
-  $("serverDisplay").textContent = new URL(configured).host;
-  $("sidebarServer").textContent = new URL(configured).host;
-  const localOnly = isLocalServer(configured);
-  $("localModeBanner").hidden = !localOnly;
-  $("openConnectionSettings").onclick = () => {
-    showPanel("settings");
-    document.querySelector('.setting-tab[data-setting="connection"]')?.click();
-    $("serverUrl").focus();
-  };
-  state.socket = io(configured, { transports: ["websocket", "polling"], timeout: 10000, reconnectionDelayMax: 10000 });
-  bindSocket(state.socket);
-  // Les hébergeurs gratuits (Render…) mettent le serveur en veille sans trafic HTTP :
-  // un signal régulier le garde éveillé pour que le code reste valable indéfiniment.
-  if (!localOnly) setInterval(() => { fetch(`${configured}/api/health`, { cache: "no-store" }).catch(() => {}); }, 4 * 60_000);
-
-  document.querySelectorAll(".nav").forEach((button) => button.onclick = () => showPanel(button.dataset.panel));
-  $("remoteCode").oninput = (event) => { event.target.value = formatCode(event.target.value); };
-  $("chooseSource").onclick = () => chooseSource().catch((error) => notify(error.message, "error"));
-  $("createSession").onclick = () => {
-    if (!state.stream) return notify("Choisissez d’abord un écran", "error");
-    state.permissions = activePermissions();
-    state.socket.emit("host-create", { deviceName: info.hostname, permissions: state.permissions, durationMinutes: Number($("sessionDurationSelect").value), available: state.available });
-    notify("Création du code…");
-  };
-  $("connect").onclick = () => {
-    const code = $("remoteCode").value.replace(/\D/g, "");
-    if (code.length !== 9) return notify("Le code doit contenir 9 chiffres", "error");
-    state.remoteCode = code;
-    state.socket.emit("viewer-request", { code, deviceName: info.hostname });
-    const recents = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]").filter((item) => item.code !== code);
-    recents.unshift({ code, name: formatCode(code), favorite: false });
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(recents.slice(0, 8)));
-    renderRecents();
-    notify("Demande envoyée. En attente de l’appareil distant.");
-  };
-  $("deny").onclick = () => {
-    state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: false });
-    $("requestDialog").close();
-  };
-  $("accept").onclick = async () => {
-    state.permissions = activePermissions();
-    state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: true, permissions: state.permissions });
-    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
-    $("requestDialog").close();
-  };
-  $("applyPermissions").onclick = async () => {
-    state.permissions = activePermissions();
-    state.socket.emit("set-permissions", { code: state.sessionCode, permissions: state.permissions });
-    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
-    notify("Permissions mises à jour", "success");
-  };
-  $("sendMessage").onclick = () => {
-    const text = $("messageInput").value.trim();
-    if (!text || !activeCode()) return;
-    state.socket.emit("chat-message", { code: activeCode(), text });
-    addMessage(text, true);
-    $("messageInput").value = "";
-  };
-  $("sendFile").onclick = () => {
-    const file = $("fileInput").files[0];
-    if (!file || !activeCode()) return notify("Choisissez un fichier pendant une session", "error");
-    if (file.size > MAX_FILE_SIZE) return notify("Le fichier dépasse 25 Mo", "error");
-    const id = `${file.name}:${file.size}`;
-    state.socket.emit("file-offer", { code: activeCode(), id, name: file.name, type: file.type, size: file.size });
-    $("fileStatus").textContent = "Proposition envoyée";
-  };
-  $("readClipboard").onclick = async () => {
-    $("clipboardText").value = await bridge.clipboardRead();
-  };
-  $("sendClipboard").onclick = () => {
-    if (!activeCode() || !state.permissions.clipboard) return notify("Presse-papiers non autorisé", "error");
-    state.socket.emit("clipboard-share", { code: activeCode(), text: $("clipboardText").value });
-    notify("Texte partagé", "success");
-  };
-  $("saveServer").onclick = () => {
-    if (!$("serverUrl").value.trim()) {
-      localStorage.removeItem(SERVER_KEY);
-      return location.reload();
-    }
-    try {
-      const url = new URL($("serverUrl").value.trim());
-      if (!["http:", "https:"].includes(url.protocol)) throw new Error();
-      localStorage.setItem(SERVER_KEY, url.origin);
-      location.reload();
-    } catch { notify("Adresse de serveur invalide", "error"); }
-  };
-  $("stop").onclick = () => stopSession();
-  $("fullscreen").onclick = () => $("remoteVideo").requestFullscreen();
-  $("fitScreen").onclick = () => { state.zoom = 1; updateZoom(); };
-  $("actualSize").onclick = () => { state.zoom = 1; $("remoteVideo").style.maxWidth = "none"; $("remoteVideo").style.maxHeight = "none"; updateZoom(); };
-  $("zoomIn").onclick = () => { state.zoom = Math.min(2.5, state.zoom + .25); updateZoom(); };
-  $("zoomOut").onclick = () => { state.zoom = Math.max(.5, state.zoom - .25); updateZoom(); };
-  $("audioToggle").onclick = () => { $("audioToggle").classList.toggle("active"); notify("Préférence audio mise à jour"); };
-  $("controlToggle").onclick = () => { $("controlToggle").classList.toggle("active"); notify(state.permissions.control ? "Contrôle autorisé par l’hôte" : "Session en lecture seule"); };
-  document.querySelectorAll("[data-session-panel]").forEach((button) => button.onclick = () => {
-    $("sessionDrawer").classList.add("open");
-    document.querySelectorAll(".drawer-content").forEach((content) => content.classList.toggle("active", content.id === button.dataset.sessionPanel));
-  });
-  $("closeDrawer").onclick = () => $("sessionDrawer").classList.remove("open");
-  document.querySelectorAll(".setting-tab").forEach((button) => button.onclick = () => {
-    document.querySelectorAll(".setting-tab").forEach((tab) => tab.classList.toggle("active", tab === button));
-    document.querySelectorAll(".setting-page").forEach((page) => page.classList.toggle("active", page.id === `setting-${button.dataset.setting}`));
-  });
-  $("copyCode").onclick = async () => {
-    await navigator.clipboard.writeText(state.sessionCode);
-    notify("ID copié dans le presse-papiers", "success");
-  };
-  $("clearRecents").onclick = () => { localStorage.removeItem(RECENTS_KEY); renderRecents(); };
-  $("historySearch").oninput = renderHistory;
-  $("historyFilter").onchange = renderHistory;
-  $("availability").onclick = async () => {
-    const off = $("availability").classList.toggle("off");
-    state.available = !off;
-    $("availability").querySelector("span").textContent = off ? "Indisponible" : "Disponible";
-    $("availabilityText").textContent = off ? "Indisponible" : "Disponible";
-    await bridge.setAvailability(state.available);
-    if (state.sessionCode) state.socket.emit("host-availability", { code: state.sessionCode, available: state.available });
-  };
-  $("rejectFile").onclick = () => decideFile(false);
-  $("acceptFile").onclick = () => decideFile(true);
-  bridge.onStopConnections(() => stopSession());
-  bridge.onAvailabilityChanged((value) => {
-    state.available = value;
-    $("availability").classList.toggle("off", !value);
-    $("availability").querySelector("span").textContent = value ? "Disponible" : "Indisponible";
-    $("availabilityText").textContent = value ? "Disponible" : "Indisponible";
-    if (state.sessionCode) state.socket.emit("host-availability", { code: state.sessionCode, available: value });
-  });
-  const renderDiagnostics = async () => {
-    const details = await bridge.systemInfo();
-    systemDiagnostics = {
-      generatedAt: new Date().toISOString(),
-      application: { version: details.version, electron: details.electron, chromium: details.chromium, node: details.node },
-      system: { platform: details.platform, release: details.platformRelease, memoryBytes: details.memoryBytes, cpu: details.cpu, cpuCores: details.cpuCores, gpu: details.gpu, gpuFeatures: details.gpuFeatures },
-      connection: { server: $("serverDisplay").textContent, socketIo: state.socket?.connected ? "connected" : "disconnected", webrtc: state.peer?.connectionState || "inactive", ice: state.peer?.iceConnectionState || "inactive" },
-      media: { resolution: state.stream?.getVideoTracks()[0]?.getSettings?.() || null }
-    };
-    $("diagnosticsReport").textContent = JSON.stringify(systemDiagnostics, null, 2);
-  };
-  $("refreshDiagnostics").onclick = () => renderDiagnostics().catch(() => notify("Diagnostics indisponibles", "error"));
-  $("exportDiagnostics").onclick = async () => {
-    await renderDiagnostics();
-    const data = new TextEncoder().encode(JSON.stringify(systemDiagnostics, null, 2));
-    const result = await bridge.saveReceivedFile({ name: `madrador-diagnostics-${Date.now()}.json`, data });
-    notify(result.ok ? "Rapport de diagnostic exporté" : "Export annulé", result.ok ? "success" : "info");
-  };
-  await renderDiagnostics();
-  bridge.onUpdaterStatus(updateUpdater);
-  bridge.onOpenUpdateDialog(() => $("updateDialog").showModal());
-  $("updateButton").onclick = () => bridge.updateAction($("updateButton").dataset.action || "check").then((result) => {
-    if (!result.ok) notify(result.error, "error");
-  }).catch(() => notify("La mise à jour est momentanément indisponible. Aucun fichier latest.yml n’est encore publié.", "error"));
-  $("closeUpdateDialog").onclick = () => $("updateDialog").close();
-  $("updateLater").onclick = () => {
-    if (state.update.status === "downloaded") bridge.updateAction("later");
-    $("updateDialog").close();
-    notify(state.update.status === "downloaded" ? "La mise à jour sera installée à la fermeture de l’application." : "Nous vous le rappellerons plus tard.");
-  };
-  $("updatePrimary").onclick = () => {
-    const action = state.update.status === "downloaded" ? "install" : "download";
-    bridge.updateAction(action).catch(() => notify("Impossible de lancer cette mise à jour pour le moment.", "error"));
-  };
-  renderRecents();
-  renderHistory();
-  ["mousedown", "mouseup"].forEach((type) => $("remoteVideo").addEventListener(type, (event) => {
-    if (type === "mousedown") $("remoteVideo").focus();
-    if (event.button > 2) return;
+function bindRemoteInput() {
+  const video = $("remoteVideo");
+  for (const type of ["mousedown", "mouseup"]) {
+    video.addEventListener(type, (event) => {
+      if (type === "mousedown") video.focus();
+      if (event.button > 2 || !canControl()) return;
+      event.preventDefault();
+      sendPayload({ type, ...videoPoint(event), button: event.button });
+    });
+  }
+  video.addEventListener("mousemove", (event) => sendPayload({ type: "mousemove", ...videoPoint(event) }));
+  video.addEventListener("wheel", (event) => {
+    if (!canControl()) return;
     event.preventDefault();
-    sendInput(type, event, { button: event.button });
-  }));
-  $("remoteVideo").addEventListener("mousemove", (event) => sendInput("mousemove", event));
-  $("remoteVideo").addEventListener("wheel", (event) => { event.preventDefault(); sendInput("wheel", event, { deltaY: Math.max(-10000, Math.min(10000, event.deltaY)) }); }, { passive: false });
-  $("remoteVideo").addEventListener("keydown", sendKey);
-  $("remoteVideo").addEventListener("contextmenu", (event) => event.preventDefault());
+    sendPayload({ type: "wheel", ...videoPoint(event), deltaY: Math.max(-10000, Math.min(10000, event.deltaY)) });
+  }, { passive: false });
+  video.addEventListener("keydown", (event) => {
+    if (!canControl()) return;
+    event.preventDefault();
+    sendPayload({ type: "keydown", key: event.key.slice(0, 40), code: event.code.slice(0, 40), ctrl: event.ctrlKey, shift: event.shiftKey, alt: event.altKey, meta: event.metaKey });
+  });
+  video.addEventListener("contextmenu", (event) => event.preventDefault());
+  video.addEventListener("loadedmetadata", () => { if (state.zoom) setZoom(state.zoom); });
 }
 
-function decideFile(accepted) {
-  const offer = state.pendingFileOffer;
-  if (!offer) return;
-  accepted = accepted && state.permissions.files;
-  state.socket.emit("file-decision", { id: offer.id, accepted });
-  $("fileStatus").textContent = accepted ? "En attente du fichier…" : "Fichier refusé";
-  $("fileDialog").close();
-  state.pendingFileOffer = null;
+/* ---------- Socket.IO ---------- */
+
+function bindSocket(socket) {
+  socket.on("connect", () => {
+    $("serverDot").className = "dot online";
+    $("serverLabel").textContent = "Serveur connecté";
+    // Reprise après une coupure réseau : en session, ou hôte en attente avec son code.
+    if (state.resumeToken && state.role === "viewer" && state.remoteCode) socket.emit("resume-session", { code: state.remoteCode, resumeToken: state.resumeToken, role: "viewer" });
+    else if (state.resumeToken && state.hostCode) socket.emit("resume-session", { code: state.hostCode, resumeToken: state.resumeToken, role: "host" });
+  });
+  socket.on("disconnect", () => {
+    $("serverDot").className = "dot warn";
+    $("serverLabel").textContent = "Reconnexion…";
+  });
+  socket.on("connect_error", () => {
+    $("serverDot").className = "dot warn";
+    $("serverLabel").textContent = "Serveur injoignable";
+  });
+
+  socket.on("host-created", ({ code, expiresAt, resumeToken }) => {
+    state.hostCode = code;
+    state.resumeToken = resumeToken;
+    bridge.setHostCode(code);
+    showHostWaiting(code, expiresAt);
+  });
+  socket.on("host-unavailable", ({ reason }) => notify(reason, "error", "Indisponible"));
+  socket.on("session-expired", () => {
+    if (state.role) return;
+    resetHostCard({ keepStream: true });
+    notify("Le code a expiré. Générez-en un nouveau si besoin.", "info", "Code expiré");
+  });
+  socket.on("incoming-request", ({ viewerSocketId, deviceName }) => {
+    state.pendingViewer = viewerSocketId;
+    state.pendingViewerName = deviceName || "Un ordinateur";
+    $("requester").textContent = state.pendingViewerName;
+    const defaults = hostPermissions();
+    $("reqControl").checked = defaults.control;
+    $("reqClipboard").checked = defaults.clipboard;
+    $("reqFiles").checked = defaults.files;
+    if (!$("requestDialog").open) $("requestDialog").showModal();
+    bridge.focusWindow?.();
+    systemNotify("Demande de connexion", `${state.pendingViewerName} souhaite voir votre écran.`);
+  });
+  socket.on("viewer-approved", async ({ code, permissions, resumeToken, deviceName }) => {
+    if (state.remoteCode !== code) {
+      // L'aidant a annulé entre-temps : on referme proprement.
+      socket.emit("end-session", { code });
+      return;
+    }
+    state.resumeToken = resumeToken;
+    state.permissions = permissions;
+    state.peerName = deviceName || "Ordinateur distant";
+    setViewerPending(false);
+    await createPeer(false);
+    enterSession("viewer");
+  });
+  socket.on("viewer-denied", ({ reason }) => {
+    if (!state.remoteCode) return;
+    addHistory({ code: state.remoteCode, device: formatCode(state.remoteCode), type: "Sortante", status: "failed" });
+    state.remoteCode = null;
+    setViewerPending(false);
+    notify(reason, "error", "Connexion refusée");
+  });
+  socket.on("viewer-ready", async () => {
+    if (!state.stream) return notify("Aucun écran sélectionné.", "error");
+    enterSession("host");
+    const peer = await createPeer(true);
+    for (const track of state.stream.getTracks()) {
+      if (track.kind === "video") track.contentHint = (QUALITY[prefs.quality] || QUALITY.sharp).hint;
+      peer.addTrack(track, state.stream);
+    }
+    await sendOffer(peer);
+  });
+  socket.on("peer-reconnecting", () => setSessionStatus("Reconnexion de l’autre ordinateur…"));
+  socket.on("peer-resumed", async () => {
+    setSessionStatus("Connecté");
+    if (state.peer && state.role === "host") await sendOffer(state.peer, true).catch((error) => console.warn(error));
+  });
+  socket.on("session-resumed", () => setSessionStatus("Connecté"));
+  socket.on("resume-denied", () => {
+    // Serveur redémarré : la liaison directe peut continuer sans lui.
+    if (state.peer && ["connected", "connecting"].includes(state.peer.connectionState)) {
+      notify("Le serveur a redémarré. L’écran et le contrôle continuent ; le chat et les fichiers reviendront à la prochaine session.", "info", "Session maintenue");
+      return;
+    }
+    if (!state.role && state.hostCode) {
+      resetHostCard({ keepStream: true });
+      notify("Le serveur a redémarré : générez un nouveau code.", "info", "Code expiré");
+      return;
+    }
+    endSession({ notifyPeer: false, reason: "La session a expiré." });
+  });
+  socket.on("signal", (payload) => handleSignal(payload).catch((error) => notify(`Négociation impossible : ${error.message}`, "error")));
+  socket.on("permissions-state", (permissions) => {
+    const gainedControl = permissions.control && !state.permissions.control;
+    state.permissions = permissions;
+    updateToolAvailability();
+    notify(gainedControl ? "Vous pouvez maintenant contrôler l’ordinateur." : permissions.control ? "Autorisations mises à jour." : "Le contrôle vous a été retiré.", "info", "Autorisations");
+  });
+  socket.on("remote-input", (payload) => { if (state.role === "host") bridge.sendRemoteInput(payload).catch(() => {}); });
+  socket.on("chat-message", ({ text }) => addMessage(text));
+  socket.on("clipboard-share", ({ text }) => {
+    $("clipboardText").value = text;
+    notify("Texte reçu dans le panneau Presse-papiers.", "success", "Presse-papiers");
+  });
+  socket.on("file-offer", ({ id, name, size }) => {
+    state.pendingFileOffer = { id, name, size };
+    $("fileOfferText").textContent = `${name} · ${formatBytes(size)}`;
+    $("fileDialog").showModal();
+  });
+  socket.on("file-decision", async ({ id, accepted }) => {
+    const file = $("fileInput").files[0];
+    if (!accepted || !file || id !== `${file.name}:${file.size}`) {
+      $("fileStatus").textContent = "Le fichier a été refusé.";
+      return;
+    }
+    $("fileStatus").textContent = "Envoi en cours…";
+    socket.emit("file-data", { code: sessionCode(), id, name: file.name, type: file.type, size: file.size, data: await file.arrayBuffer() });
+    $("fileStatus").textContent = `${file.name} envoyé.`;
+  });
+  socket.on("file-data", async ({ name, data }) => {
+    const result = await bridge.saveReceivedFile({ name, data });
+    $("fileStatus").textContent = result.ok ? `Enregistré : ${result.path}` : "Enregistrement annulé.";
+    if (result.ok) notify(name, "success", "Fichier reçu");
+  });
+  socket.on("session-ended", () => {
+    if (state.role) endSession({ notifyPeer: false, reason: "L’autre personne a mis fin à la session." });
+    else if (state.hostCode) resetHostCard({ keepStream: true });
+  });
 }
-function updateZoom() {
-  $("remoteVideo").style.transform = `scale(${state.zoom})`;
-  $("zoomLevel").textContent = `${Math.round(state.zoom * 100)}%`;
+
+/* ---------- Mises à jour ---------- */
+
+// Les notes GitHub sont en HTML : on n'en garde que le texte (DOMParser n'exécute rien).
+function plainText(html) {
+  return new DOMParser().parseFromString(String(html || ""), "text/html").body.textContent || "";
 }
+
 function updateUpdater(data) {
   state.update = data;
   const labels = {
     idle: ["Mises à jour", "Vérification automatique au démarrage."],
-    development: ["Mode développement", "Les mises à jour sont actives dans la version installée."],
-    cached: ["Vérification récente", "La prochaine vérification automatique aura lieu plus tard."],
+    development: ["Mode développement", "Les mises à jour fonctionnent dans la version installée."],
+    cached: ["Vérification récente", "La prochaine vérification aura lieu plus tard."],
     checking: ["Recherche en cours…", "Connexion au service de mises à jour."],
-    available: [`Version ${data.version} disponible`, "Une nouvelle version est prête à télécharger."],
-    current: ["Madrador Remote est à jour", `Version ${data.version}`],
-    downloading: ["Téléchargement en cours", `${data.percent}% téléchargés`],
+    available: [`Version ${data.version} disponible`, "Prête à être téléchargée."],
+    current: ["Madrador Remote est à jour", `Version ${data.version || ""}`],
+    downloading: ["Téléchargement…", `${data.percent || 0} %`],
     downloaded: [`Version ${data.version} prête`, "Installez maintenant ou au prochain redémarrage."],
-    scheduled: ["Installation planifiée", "La mise à jour sera installée à la fermeture de l’application."],
-    error: ["Mise à jour indisponible", "Aucune mise à jour complète n’est publiée pour le moment. Réessayez plus tard."]
+    scheduled: ["Installation planifiée", "La mise à jour sera installée à la fermeture."],
+    error: ["Mise à jour indisponible", "Réessayez plus tard."]
   };
   const [title, description] = labels[data.status] || labels.error;
   $("updateTitle").textContent = title;
@@ -726,40 +898,303 @@ function updateUpdater(data) {
   $("updateProgress").hidden = data.status !== "downloading";
   $("updateProgress").value = data.percent || 0;
   const notes = typeof data.notes === "string" ? data.notes : Array.isArray(data.notes) ? data.notes.map((note) => note.note || "").join("\n") : "";
-  $("releaseNotes").textContent = notes.slice(0, 1000);
-  if (data.status === "available") { $("updateButton").textContent = "Télécharger"; $("updateButton").dataset.action = "download"; }
-  else if (data.status === "downloaded") { $("updateButton").textContent = "Installer maintenant"; $("updateButton").dataset.action = "install"; }
-  else if (["current", "cached", "development", "error"].includes(data.status)) { $("updateButton").textContent = "Rechercher une mise à jour"; $("updateButton").dataset.action = "check"; }
+  $("releaseNotes").textContent = plainText(notes).slice(0, 1500);
+  const action = data.status === "available" ? "download" : data.status === "downloaded" ? "install" : "check";
+  $("updateButton").dataset.action = action;
+  $("updateButton").textContent = { download: "Télécharger", install: "Installer", check: "Rechercher" }[action];
+  $("updateButton").disabled = ["checking", "downloading"].includes(data.status);
 
   if (["available", "downloading", "downloaded"].includes(data.status)) {
-    if (!$("updateDialog").open) $("updateDialog").showModal();
-    $("updateDialogTitle").textContent = data.status === "downloaded" ? "La mise à jour est prête." : data.status === "downloading" ? "Téléchargement en cours…" : "Nouvelle version disponible !";
-    $("updateDialogDescription").textContent = data.status === "available" ? `Madrador Remote ${data.version} est disponible.` : data.status === "downloaded" ? `Madrador Remote ${data.version} a été téléchargé et vérifié.` : "Vous pouvez continuer à utiliser l’application.";
-    $("updateDialogNotes").textContent = notes || "Corrections, améliorations et optimisations incluses dans cette version.";
+    if (!$("updateDialog").open && !state.role) $("updateDialog").showModal();
+    $("updateDialogTitle").textContent = data.status === "downloaded" ? "Mise à jour prête" : data.status === "downloading" ? "Téléchargement…" : "Nouvelle version disponible";
+    $("updateDialogDescription").textContent = data.status === "downloading" ? "Vous pouvez continuer à utiliser l’application." : `Madrador Remote ${data.version}`;
+    $("updateDialogNotes").textContent = plainText(notes).slice(0, 1500);
     const downloading = data.status === "downloading";
     $("downloadMetrics").hidden = !downloading;
     $("updateDialogProgress").hidden = !downloading;
     $("updateDialogProgress").value = data.percent || 0;
     $("downloadPercent").textContent = `${data.percent || 0} %`;
-    $("downloadSpeed").textContent = formatBytes(data.bytesPerSecond || 0) + "/s";
-    $("downloadEta").textContent = data.secondsRemaining == null ? "Calcul…" : formatEta(data.secondsRemaining);
+    $("downloadSpeed").textContent = `${formatBytes(data.bytesPerSecond || 0)}/s`;
+    $("downloadEta").textContent = data.secondsRemaining == null ? "…" : data.secondsRemaining < 60 ? `${data.secondsRemaining} s` : `${Math.floor(data.secondsRemaining / 60)} min`;
     $("integrityStatus").hidden = data.status !== "downloaded";
-    $("integrityStatus").textContent = data.integrity?.verified ? `✓ Intégrité vérifiée (${data.integrity.algorithm})` : "✓ Téléchargement vérifié par electron-updater";
-    $("updatePrimary").textContent = data.status === "downloaded" ? "Installer maintenant" : data.status === "downloading" ? "Téléchargement…" : "Télécharger maintenant";
+    $("integrityStatus").textContent = `Intégrité vérifiée (${data.integrity?.algorithm || "SHA-512"})`;
+    $("updatePrimary").textContent = data.status === "downloaded" ? "Redémarrer et installer" : "Télécharger";
     $("updatePrimary").disabled = downloading;
-    $("updateLater").textContent = data.status === "downloaded" ? "Installer au prochain redémarrage" : "Plus tard";
+    $("updateLater").textContent = data.status === "downloaded" ? "À la fermeture" : "Plus tard";
   }
 }
 
-function formatBytes(bytes) {
-  if (!bytes) return "0 o";
-  const units = ["o", "Ko", "Mo", "Go"];
-  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
-  return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
+/* ---------- Diagnostic ---------- */
+
+async function renderDiagnostics() {
+  const details = await bridge.systemInfo();
+  const report = {
+    generatedAt: new Date().toISOString(),
+    application: { version: details.version, electron: details.electron, chromium: details.chromium, node: details.node },
+    system: { platform: details.platform, release: details.platformRelease, memoryGb: Math.round(details.memoryBytes / 1024 ** 3), cpu: details.cpu, cpuCores: details.cpuCores, gpu: details.gpu, displays: details.displays },
+    connection: {
+      server: state.serverUrl ? new URL(state.serverUrl).host : null,
+      localMode: isLocalServer(state.serverUrl),
+      socketIo: state.socket?.connected ? "connected" : "disconnected",
+      webrtc: state.peer?.connectionState || "inactive",
+      ice: state.peer?.iceConnectionState || "inactive",
+      route: $("statRoute").textContent
+    }
+  };
+  $("diagnosticsReport").textContent = JSON.stringify(report, null, 2);
+  return report;
 }
-function formatEta(seconds) {
-  if (seconds < 60) return `${seconds} s`;
-  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+
+/* ---------- Paramètres ---------- */
+
+async function testServer(url) {
+  // Testé par le processus principal : pas de restriction CORS depuis l'interface.
+  const result = await bridge.testServer(new URL(url).origin);
+  if (!result.ok) throw new Error(result.error);
+  return result.ms;
+}
+
+function bindSettings() {
+  $("serverUrl").value = localStorage.getItem(KEYS.server) || "";
+  $("serverUrl").placeholder = state.serverUrl;
+  $("testServer").onclick = async () => {
+    const value = $("serverUrl").value.trim() || state.serverUrl;
+    $("serverTestResult").className = "muted";
+    $("serverTestResult").textContent = "Test en cours… (un serveur gratuit en veille peut mettre jusqu’à une minute à répondre)";
+    try {
+      const ms = await testServer(value);
+      $("serverTestResult").className = "ok";
+      $("serverTestResult").textContent = `✓ Serveur joignable (${ms} ms).`;
+    } catch (error) {
+      $("serverTestResult").className = "bad";
+      $("serverTestResult").textContent = `✗ ${error.message || "Adresse injoignable."}`;
+    }
+  };
+  $("saveServer").onclick = () => {
+    const value = $("serverUrl").value.trim();
+    if (!value) {
+      try { localStorage.removeItem(KEYS.server); } catch {}
+      return location.reload();
+    }
+    try {
+      const url = new URL(value);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+      if (state.role && !confirm("La session en cours sera interrompue. Continuer ?")) return;
+      localStorage.setItem(KEYS.server, url.origin);
+      location.reload();
+    } catch { notify("Adresse de serveur invalide.", "error"); }
+  };
+  $("qualitySelect").value = prefs.quality;
+  $("qualitySelect").onchange = () => { prefs.quality = $("qualitySelect").value; savePrefs(); applyQuality(); notify("Qualité d’image mise à jour.", "success"); };
+  $("themeSelect").value = prefs.theme;
+  $("themeSelect").onchange = () => { prefs.theme = $("themeSelect").value; savePrefs(); applyTheme(); };
+  $("prefNotifications").checked = prefs.notifications;
+  $("prefStartup").checked = prefs.launchAtStartup;
+  const pushPrefs = () => bridge.setPreferences({ notifications: prefs.notifications, launchAtStartup: prefs.launchAtStartup }).catch(() => notify("Réglage non appliqué.", "error"));
+  $("prefNotifications").onchange = () => { prefs.notifications = $("prefNotifications").checked; savePrefs(); pushPrefs(); };
+  $("prefStartup").onchange = () => { prefs.launchAtStartup = $("prefStartup").checked; savePrefs(); pushPrefs(); };
+  $("refreshDiagnostics").onclick = () => renderDiagnostics().catch(() => notify("Diagnostic indisponible.", "error"));
+  $("exportDiagnostics").onclick = async () => {
+    const report = await renderDiagnostics();
+    const result = await bridge.saveReceivedFile({ name: `madrador-diagnostic-${Date.now()}.json`, data: new TextEncoder().encode(JSON.stringify(report, null, 2)) });
+    if (result.ok) notify("Rapport exporté.", "success");
+  };
+  $("updateButton").onclick = () => bridge.updateAction($("updateButton").dataset.action || "check")
+    .then((result) => { if (!result.ok) notify(result.error, "info"); })
+    .catch(() => notify("Mise à jour momentanément indisponible.", "error"));
+  $("updateLater").onclick = () => {
+    if (state.update.status === "downloaded") bridge.updateAction("later");
+    $("updateDialog").close();
+  };
+  $("updatePrimary").onclick = () => bridge.updateAction(state.update.status === "downloaded" ? "install" : "download").catch(() => notify("Mise à jour impossible pour le moment.", "error"));
+}
+
+/* ---------- Démarrage ---------- */
+
+function bindUi() {
+  $$("[data-view]").forEach((button) => { button.onclick = () => showView(button.dataset.view); });
+  $("openConnectionSettings").onclick = () => { showView("settings"); $("serverUrl").focus(); };
+
+  // Accueil — partage
+  for (const [id, key] of [["permControl", "control"], ["permClipboard", "clipboard"], ["permFiles", "files"]]) {
+    $(id).checked = Boolean(prefs.permissions[key]);
+    $(id).onchange = () => { prefs.permissions[key] = $(id).checked; savePrefs(); };
+  }
+  $("durationSelect").value = String(prefs.duration);
+  $("durationSelect").onchange = () => { prefs.duration = Number($("durationSelect").value); savePrefs(); };
+  $("chooseSource").onclick = () => openSourcePicker().catch((error) => notify(error.message, "error"));
+  $("createCode").onclick = createHostCode;
+  $("newCode").onclick = createHostCode;
+  $("stopHosting").onclick = stopHosting;
+  $("copyCode").onclick = async () => {
+    await navigator.clipboard.writeText(state.hostCode || "");
+    notify("Code copié : envoyez-le à la personne qui vous aide.", "success");
+  };
+  $("availability").onclick = async () => {
+    const available = $("availability").getAttribute("aria-pressed") !== "true";
+    await bridge.setAvailability(available);
+    setAvailability(available);
+  };
+  $$("[data-close]").forEach((button) => { button.onclick = () => button.closest("dialog").close(); });
+
+  // Accueil — connexion
+  $("remoteCode").oninput = (event) => { event.target.value = formatCode(event.target.value); };
+  $("connectForm").onsubmit = requestConnection;
+  $("cancelConnect").onclick = cancelConnection;
+  $("clearRecents").onclick = () => { writeJson(KEYS.recents, []); renderRecents(); };
+
+  // Demande entrante
+  let decided = false;
+  $("requestDialog").addEventListener("close", () => {
+    if (!decided && state.pendingViewer) state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: false });
+    decided = false;
+  });
+  $("deny").onclick = () => $("requestDialog").close();
+  $("accept").onclick = async () => {
+    decided = true;
+    state.permissions = { control: $("reqControl").checked, clipboard: $("reqClipboard").checked, files: $("reqFiles").checked };
+    state.socket.emit("host-decision", { viewerSocketId: state.pendingViewer, approved: true, permissions: state.permissions });
+    await bridge.setControlEnabled({ enabled: state.permissions.control, bounds: state.selectedBounds });
+    $("requestDialog").close();
+  };
+
+  // Session — aidant
+  $("toggleControl").onclick = () => { state.inputPaused = !state.inputPaused; updateControlUi(); if (!state.inputPaused) $("remoteVideo").focus(); };
+  $("keysMenuButton").onclick = () => {
+    const open = $("keysMenu").hidden;
+    $("keysMenu").hidden = !open;
+    $("keysMenuButton").setAttribute("aria-expanded", String(open));
+    if (open) $("keysMenu").querySelector("button").focus();
+  };
+  $$("[data-combo]").forEach((button) => {
+    button.onclick = () => {
+      sendPayload({ type: "keydown", ...{ ctrl: false, shift: false, alt: false, meta: false }, ...COMBOS[button.dataset.combo] });
+      $("keysMenu").hidden = true;
+      $("keysMenuButton").setAttribute("aria-expanded", "false");
+      $("remoteVideo").focus();
+    };
+  });
+  document.addEventListener("click", (event) => {
+    if (!$("keysMenu").hidden && !event.target.closest(".menu-wrap")) {
+      $("keysMenu").hidden = true;
+      $("keysMenuButton").setAttribute("aria-expanded", "false");
+    }
+  });
+  $("zoomFit").onclick = () => setZoom(0);
+  $("zoomLabel").onclick = () => setZoom(1);
+  $("zoomIn").onclick = () => setZoom(Math.min(2.5, (state.zoom || 1) + 0.25));
+  $("zoomOut").onclick = () => setZoom(Math.max(0.25, (state.zoom || 1) - 0.25));
+  $("fullscreen").onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $("stage").requestFullscreen()).catch(() => {});
+  $("disconnect").onclick = () => endSession({ reason: "Vous avez quitté la session." });
+
+  // Session — hôte
+  $("hostStop").onclick = () => endSession({ reason: "Vous avez arrêté le partage." });
+  for (const id of ["livePermControl", "livePermClipboard", "livePermFiles"]) $(id).onchange = () => applyLivePermissions();
+
+  // Panneau latéral
+  $$("[data-panel]").forEach((button) => { button.onclick = () => openSidePanel(button.dataset.panel); });
+  $("closeSide").onclick = closeSidePanel;
+  $("chatForm").onsubmit = (event) => {
+    event.preventDefault();
+    const text = $("messageInput").value.trim();
+    if (!text || !sessionCode()) return;
+    state.socket.emit("chat-message", { code: sessionCode(), text });
+    addMessage(text, true);
+    $("messageInput").value = "";
+  };
+  $("fileInput").onchange = () => {
+    const file = $("fileInput").files[0];
+    $("fileLabel").textContent = file ? `${file.name} · ${formatBytes(file.size)}` : "Choisir un fichier";
+  };
+  $("sendFile").onclick = () => {
+    const file = $("fileInput").files[0];
+    if (!file) return notify("Choisissez d’abord un fichier.", "error");
+    if (file.size > MAX_FILE_SIZE) return notify("Le fichier dépasse 25 Mo.", "error");
+    if (!state.permissions.files) return notify("Les fichiers ne sont pas autorisés dans cette session.", "error");
+    state.socket.emit("file-offer", { code: sessionCode(), id: `${file.name}:${file.size}`, name: file.name, type: file.type, size: file.size });
+    $("fileStatus").textContent = "En attente de l’accord de l’autre personne…";
+  };
+  $("readClipboard").onclick = async () => { $("clipboardText").value = await bridge.clipboardRead(); };
+  $("sendClipboard").onclick = () => {
+    const text = $("clipboardText").value;
+    if (!text) return notify("Le texte est vide.", "error");
+    state.socket.emit("clipboard-share", { code: sessionCode(), text });
+    notify("Texte envoyé.", "success");
+  };
+  $("writeClipboard").onclick = async () => {
+    await bridge.clipboardWrite($("clipboardText").value);
+    notify("Texte copié sur ce PC.", "success");
+  };
+  $("rejectFile").onclick = () => decideFile(false);
+  $("acceptFile").onclick = () => decideFile(true);
+
+  // Historique
+  $("historySearch").oninput = renderHistory;
+  $("historyFilter").onchange = renderHistory;
+  $("clearHistory").onclick = () => { if (confirm("Effacer tout l’historique de cet ordinateur ?")) { writeJson(KEYS.history, []); renderHistory(); } };
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("keysMenu").hidden) $("keysMenu").hidden = true;
+  });
+  bindRemoteInput();
+}
+
+function decideFile(accepted) {
+  const offer = state.pendingFileOffer;
+  if (!offer) return;
+  state.socket.emit("file-decision", { code: sessionCode(), id: offer.id, accepted: accepted && state.permissions.files });
+  $("fileStatus").textContent = accepted ? "Réception…" : "Fichier refusé.";
+  $("fileDialog").close();
+  state.pendingFileOffer = null;
+}
+
+function setAvailability(available) {
+  state.available = available;
+  $("availability").setAttribute("aria-pressed", String(available));
+  $("availability").querySelector("span").textContent = available ? "Disponible" : "Indisponible";
+  if (state.hostCode) {
+    state.socket.emit("host-availability", { code: state.hostCode, available });
+    $("hostWaitingText").textContent = available ? "En attente d’une demande de connexion…" : "Indisponible : les demandes sont refusées.";
+  }
+}
+
+async function init() {
+  if (!bridge) throw new Error("API Electron indisponible");
+  applyTheme();
+  const info = await bridge.systemInfo();
+  state.info = info;
+  $("deviceName").textContent = info.hostname;
+  $("avatar").textContent = initials(info.hostname);
+  $("appVersion").textContent = `Version ${info.version}`;
+  $("aboutVersion").textContent = `Version ${info.version} · Electron ${info.electron}`;
+
+  let configured = "";
+  try { configured = localStorage.getItem(KEYS.server) || ""; } catch {}
+  configured ||= await bridge.getSignalUrl();
+  if (!configured) throw new Error("Le serveur intégré n’a pas pu démarrer.");
+  state.serverUrl = configured;
+  const localOnly = isLocalServer(configured);
+  $("serverHost").textContent = localOnly ? "Mode local (ce PC uniquement)" : new URL(configured).host;
+  $("localModeBanner").hidden = !localOnly;
+
+  bindUi();
+  bindSettings();
+  renderRecents();
+  renderHistory();
+  bridge.setPreferences({ notifications: prefs.notifications, launchAtStartup: prefs.launchAtStartup }).catch(() => {});
+
+  state.socket = io(configured, { transports: ["websocket", "polling"], timeout: 10000, reconnectionDelayMax: 10000 });
+  bindSocket(state.socket);
+  if (!localOnly) setInterval(() => { fetch(`${configured}/api/health`, { cache: "no-store", mode: "no-cors" }).catch(() => {}); }, 4 * 60_000);
+
+  bridge.onStopConnections(() => {
+    if (state.role) endSession({ reason: "Connexions arrêtées depuis la zone de notification." });
+    else if (state.hostCode) stopHosting();
+  });
+  bridge.onAvailabilityChanged((value) => setAvailability(value));
+  bridge.onUpdaterStatus(updateUpdater);
+  bridge.onOpenUpdateDialog(() => $("updateDialog").showModal());
+  renderDiagnostics().catch(() => {});
 }
 
 init().catch((error) => notify(`Démarrage impossible : ${error.message}`, "error"));
